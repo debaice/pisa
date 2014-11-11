@@ -71,9 +71,20 @@ class NumpyDecoder(json.JSONDecoder):
                  parse_int=None, parse_constant=None, strict=True,
                  object_pairs_hook=None):
         
+        def hook(d):
+            '''
+            Object hook that converts lists to numpy arrays and unicode
+            strings to python strings.
+            '''
+            for k,v in d.iteritems():
+                if isinstance(v,list):
+                    d[k] = np.array(v)
+                    if len(v) < 3: print v, type(v), type(v[0])
+            return d
+
         #JSONDecoder interface changed from python2.6 to python2.7
         if sys.version_info[0:2] >= (2,7):
-           super(NumpyDecoder,self).__init__(encoding, object_hook, parse_float,
+           super(NumpyDecoder,self).__init__(encoding, hook, parse_float,
                                               parse_int, parse_constant, strict,
                                               object_pairs_hook)
         else:
@@ -81,13 +92,15 @@ class NumpyDecoder(json.JSONDecoder):
                                               parse_int, parse_constant, strict)
  
         #only need to override the default array handler
-        self.parse_array = self.json_array_numpy
+        #self.parse_array = self.json_array_numpy
         self.parse_string = self.json_python_string
         #self.memo = {}
         self.scan_once = json.scanner.py_make_scanner(self)
 
     def json_array_numpy(self, s_and_end, scan_once, **kwargs):
         values, end = json.decoder.JSONArray(s_and_end, scan_once, **kwargs)
+        if len(values) < 3: print values, type(values), type(values[0])
+        else: print  type(values), type(values[0])
         return np.array(values), end
 
     def json_python_string(self, s, end, encoding, strict):
