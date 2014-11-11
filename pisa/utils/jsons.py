@@ -34,7 +34,7 @@ def json_string(string):
 def from_json(filename):
     '''Open a file in JSON format an parse the content'''
     try:
-        content = json.load(open(os.path.expandvars(filename)),cls=NumpyDecoder)
+        content = json.load(open(os.path.expandvars(filename)),object_hook=NumpyDecoderHook)
         return content
     except (IOError, JSONDecodeError), e:
         logging.error("Unable to read JSON file \'%s\'"%filename)
@@ -61,48 +61,27 @@ class NumpyEncoder(json.JSONEncoder):
 
         return json.JSONEncoder.default(self, o)
 
+def NumpyDecoderHook(data):
+    '''
+    Object hook that converts lists to numpy arrays and unicode
+    strings to python strings by iteratively walking through the data.
+    (Only json returns "unicode", simplejson returns "str")
+    '''
 
-class NumpyDecoder(json.JSONDecoder):
-    """ 
-    Encode to numpy.ndarrays from JSON array, also returns python strings
-    instead of unicode.
-    """
-    def __init__(self, encoding=None, object_hook=None, parse_float=None,
-                 parse_int=None, parse_constant=None, strict=True,
-                 object_pairs_hook=None):
-        
-        def hook(d):
-            '''
-            Object hook that converts lists to numpy arrays and unicode
-            strings to python strings.
-            '''
-            for k,v in d.iteritems():
-                if isinstance(v,list):
-                    d[k] = np.array(v)
-                    if len(v) < 3: print v, type(v), type(v[0])
-            return d
+    #Use this same function to convert interatively
+    convert = NumpyDecoderHook
 
-        #JSONDecoder interface changed from python2.6 to python2.7
-        if sys.version_info[0:2] >= (2,7):
-           super(NumpyDecoder,self).__init__(encoding, hook, parse_float,
-                                              parse_int, parse_constant, strict,
-                                              object_pairs_hook)
-        else:
-           super(NumpyDecoder,self).__init__(encoding, object_hook, parse_float,
-                                              parse_int, parse_constant, strict)
- 
-        #only need to override the default array handler
-        #self.parse_array = self.json_array_numpy
-        self.parse_string = self.json_python_string
-        #self.memo = {}
-        self.scan_once = json.scanner.py_make_scanner(self)
-
-    def json_array_numpy(self, s_and_end, scan_once, **kwargs):
-        values, end = json.decoder.JSONArray(s_and_end, scan_once, **kwargs)
-        if len(values) < 3: print values, type(values), type(values[0])
-        else: print  type(values), type(values[0])
-        return np.array(values), end
-
-    def json_python_string(self, s, end, encoding, strict):
-        values, end = json.decoder.scanstring(s, end, encoding, strict)
-        return values.encode('utf-8'), end
+    #Check all primitive types supported by json
+    if isinstance(data, dict):
+        return {convert(key): convert(value) for key, value in data.iteritems()}
+    elif isinstance(data, list):
+        try:
+            #Any list that can go as float array should do so
+            return np.array(data,dtype='float64')
+        except ValueError:
+            #all others are parsed iteratively
+            return [convert(element) for element in data]
+    elif isinstance(data, unicode):
+        return data.encode('utf-8')
+    else:
+        return data
