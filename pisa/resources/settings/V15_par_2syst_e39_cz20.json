@@ -31,6 +31,14 @@
       "value": "oscillations/PREM_4layer.dat",
       "fixed": true
     },
+    "detector_depth": {
+      "value": 2.0,
+      "fixed": true
+    },
+    "prop_height": {
+      "value": 20.0,
+      "fixed": true
+    },
     "aeff_egy_par": {
       "value": {
         "NC": "aeff/V15/cuts_V3/a_eff_nuall_nc.dat",
