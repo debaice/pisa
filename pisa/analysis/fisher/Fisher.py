@@ -10,9 +10,6 @@
 #                                                    #
 ######################################################
 
-# Copied from PaPA
-# TODO: clean up
-
 ### IMPORTS ###
 
 import numpy as np
@@ -22,6 +19,7 @@ import sys
 import itertools
 import json
 from scipy.stats import chi2
+from scipy.special import erfcinv
 
 from matplotlib import pylab
 from matplotlib.patches import Ellipse, Rectangle
@@ -29,27 +27,6 @@ from matplotlib.lines import Line2D
 from math import pi
 
 from pisa.utils.jsons import from_json, to_json
-
-
-### HELPER FUNCTIONS ###
-
-def derivative_from_polycoefficients(coeff, loc):
-    """
-    Return derivative of a polynomial of the form
-    
-        f(x) = coeff[0] + coeff[1]*x + coeff[2]*x**2 + ...
-    
-    at x = loc
-    """
-    
-    result = 0.
-    
-    for n in range(len(coeff))[1:]: # runs from 1 to len(coeff)
-        
-        result += n*coeff[n]*loc**(n-1)
-    
-    return result
-
 
 
 ### FISHER MATRIX CLASS DEFINITION ###
@@ -450,7 +427,26 @@ class FisherMatrix:
         scaling = np.sqrt(chi2.ppf(confLevel, 2))
         
         return scaling*np.sqrt(a_sq), scaling*np.sqrt(b_sq), tan_2_th
-    
+
+
+    def getErrorEllipseObjects(self, par1, par2, confLevels = [0.6827, 0.9544, 0.9974]):
+        """
+        Returns a list of ellipse objects for the major and minor
+        axes and tilt angle returned by getErrorEllipse,
+        corresponding to the given joint confidence levels.
+        """
+	ell_objs = []
+
+	for CL in confLevels:
+	    semi1, semi2, tan_2_th = self.getErrorEllipse(par1, par2, CL)
+	    tilt = np.arctan(tan_2_th)/2.*180./pi
+	    ell = Ellipse(xy=(self.getBestFit(par1),self.getBestFit(par2)),
+                                  width=2*semi1, height=2*semi2, angle=tilt,
+                                  alpha=1.-.5*CL)
+	    ell_objs.append(ell)
+
+	return ell_objs
+
     
     def getCorrelation(self, par1, par2):
         """
@@ -571,14 +567,13 @@ class FisherMatrix:
         return sorted_impact
 
 
-# FIXME: Do we need this?
 class PrettyFisher:
     '''
-    A wrapper class around a fisher matrix that allows to draw
-    and pretty print in iypthon
+    A wrapper class around a Fisher matrix that allows to draw
+    and pretty print in ipython
     '''
 
-    def __init__(self, fisher=None, parnames=None, parvalues=None):
+    def __init__(self, fisher, parnames=None, parvalues=None):
         '''Constructor takes
            - fisher: a Fisher matrix object
            - parnames: a list of display names for the parameters
@@ -586,25 +581,33 @@ class PrettyFisher:
         '''
 
         self.fisher = fisher
-        self.parnames = parnames
-        self.parvalues = parvalues
+	#If both parameter names and fiducial model specified, take these
+	if parnames != None and parvalues != None:
+            self.parnames = parnames
+            self.parvalues = parvalues
+	#If not, take them from the Fisher matrix fisher
+        else:
+            self.parnames = self.fisher.parameters
+            self.parvalues = self.fisher.best_fits
 
         #Some consistency checks
-        if not (str(self.fisher.__class__) == 'Fisher.Fisher.FisherMatrix'):
+        if not (str(self.fisher.__class__) == 'pisa.analysis.fisher.Fisher.FisherMatrix'):
             raise ValueError('Expected FisherMatrix object, got %s instead'%(fisher.__class__))
 
-        if not len(self.fisher.parameters)==len(self.parnames):
-            raise IndexError('Number of parameters names does not match number of parameters! [%i, %i]' \
-                %(len(self.fisher.parameters), len(self.parnames)) )
+	if parnames!=None:
+            if not len(self.fisher.parameters)==len(self.parnames):
+                raise IndexError('Number of parameters names does not match number of parameters! [%i, %i]' \
+                    %(len(self.fisher.parameters), len(self.parnames)) )
 
-        if not len(self.fisher.parameters)==len(self.parvalues):
-            raise IndexError('Number of default values does not match number of parameters! [%i, %i]' \
-                %(len(self.fisher.parameters), len(self.parvalues)) )
+	if parvalues!=None:
+            if not len(self.fisher.parameters)==len(self.parvalues):
+                raise IndexError('Number of default values does not match number of parameters! [%i, %i]' \
+                    %(len(self.fisher.parameters), len(self.parvalues)) )
 
 
     def ipynb_pretty_print(self):
         '''
-        Pretty print the matrix for the ipyhton notebook
+        Pretty print the matrix for the ipython notebook
         '''
         from IPython.display import Latex
         
@@ -629,23 +632,24 @@ class PrettyFisher:
         return Latex(outstr)
 
 
-    def draw(self, confLevels=[0.6827,0.997], parameters=None, fontsize=16):
+    def draw(self, confLevels = [0.6827, 0.9545, 0.9973], parameters=None, fontsize=16):
         '''
         Make a nice plot with all the error ellpsises
         '''
-
         #If no parameters are specified, just use all of them
         if parameters is None:
             parameters = self.fisher.parameters 
-            
-        #Otherwise, match parvalues and parlabels to given list
+
+        else:
+            parameters = parameters
+
+        #Collect parvalues and parlabels
         parvalues=[]
         parnames=[]
         for par in parameters:
             idx =  self.fisher.getParameterIndex(par)
             parvalues.append(self.parvalues[idx])
             parnames.append(self.parnames[idx])
-
 
         #Make a figure with size matched to the number of parameters
         nPar = len(parameters)
@@ -675,14 +679,9 @@ class PrettyFisher:
                 axes.label_outer()
                 axes.tick_params(which='both', labelsize=fontsize-2)
                 
-                #Draw all the requested sigma levels
-                for sigma in sorted(confLevels):
-                    #Get the three-sigma error ellipse for that parameter pair
-                    semiA, semiB, tilt = self.fisher.getErrorEllipse(par1, par2, confLevel=sigma)
-                    ell = Ellipse(xy=(parvalues[idx1],parvalues[idx2]),
-                                  width=2*semiA, height=2*semiB, angle=tilt*180./pi,
-                                  alpha=1.-sigma, **ellipseArgs)
-                    
+                #Draw the error ellipses for the requested confidence levels
+                err_ells = self.fisher.getErrorEllipseObjects(par1, par2, confLevels)
+		for ell in err_ells:
                     axes.add_artist(ell)
 
                 #Draw a red marker for the fiducial model
@@ -693,19 +692,19 @@ class PrettyFisher:
                 if axes.is_first_col():
                     pylab.ylabel(parnames[idx2],fontsize=fontsize)
 
-                #A useful range is best obtained from the marginalized errors on the parameters
-                sigma1, sigma2 = self.fisher.getSigma(par1), self.fisher.getSigma(par2)
-                #Check the max sigma level that is drawn
-                sigmaMax=max(sigmaLevels)
-                pylab.xlim(parvalues[idx1]-sigmaMax*sigma1,parvalues[idx1]+sigmaMax*sigma1)
-                pylab.ylim(parvalues[idx2]-sigmaMax*sigma2,parvalues[idx2]+sigmaMax*sigma2)
+		#Restrict plot ranges to the lengths of the axes of the largest ellipse
+		max_width = max([ell.width for ell in err_ells])
+		max_height = max([ell.height for ell in err_ells])
+		pylab.xlim(parvalues[idx1]-1.1*max_width/2.,parvalues[idx1]+1.1*max_width/2.)
+		pylab.ylim(parvalues[idx2]-1.1*max_height/2.,parvalues[idx2]+1.1*max_height/2.)
 
+		sigma1, sigma2 = self.fisher.getSigma(par1), self.fisher.getSigma(par2)
                 #Show numbers for parameters in column on top
                 if idx2 == idx1+1:
                     sigmaTot = sigma1
                     sigmaStat = self.fisher.getSigmaStatistical(par1)
                     sigmaSys = self.fisher.getSigmaSystematic(par1)
-                    pylab.title("%s\n $\mathsf{= %.2f \pm %.2f(stat) \pm %.2f(sys)}$"%
+                    pylab.title("%s\n $\mathsf{= %.3f \pm %.3f(stat) \pm %.3f(sys)}$"%
                                 (parnames[idx1], parvalues[idx1], sigmaStat, sigmaSys),
                                 fontsize=fontsize)
 
@@ -716,10 +715,10 @@ class PrettyFisher:
                     sigmaStat = self.fisher.getSigmaStatistical(par2)
                     sigmaSys = np.sqrt(sigmaTot**2 - sigmaStat**2)
                     axes.yaxis.set_label_position('right')
-                    pylab.ylabel("%s\n $\mathsf{= %.2f \pm %.2f(stat) \pm %.2f(sys)}$"%
+                    pylab.ylabel("%s\n $\mathsf{= %.3f \pm %.3f(stat) \pm %.3f(sys)}$"%
                                 (parnames[idx2], parvalues[idx2], sigmaStat, sigmaSys),
                                 fontsize=fontsize, horizontalalignment='center',
-                                rotation=-90.,labelpad=+24)
+                                rotation=-90.,labelpad=+40)
 
 
                 #Plot vertical and horizontal range to indicate one-sigma
@@ -738,9 +737,13 @@ class PrettyFisher:
                     Line2D([0],[0],**lineArgs)]
         legendLabels=[r'default value',
                       r'$1\sigma$ stat.+syst.']
-        for sigma in sorted(sigmaLevels):
-            legendObjs.append(Rectangle([0,0],0,0,alpha=1./sigma,**ellipseArgs))
-            legendLabels.append(r'$%u\sigma$ conf. region'%sigma)
+
+	#Convert given confidence levels to numbers of (double-sided) std. dev.
+	sigmaLevels = np.sqrt(2)*erfcinv(np.subtract(1.,confLevels))
+	for i in xrange(0,len(confLevels)):
+	    sigma = sorted(sigmaLevels)[i]
+            legendObjs.append(Rectangle([0,0],0,0,alpha=1.-.5*sorted(confLevels)[i],**ellipseArgs))
+            legendLabels.append(r'$%.2f\sigma$ conf. region'%sigma)
 
         #Draw a legend with all of these
         pylab.legend(legendObjs,legendLabels,
