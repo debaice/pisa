@@ -25,7 +25,7 @@
     },
     "osc_code": {
       "#comment": "Must be one of ['prob3','nucraft',or 'gpu']",
-      "value": "prob3",
+      "value": "gpu",
       "fixed": true
     },
     "earth_model": {
@@ -59,12 +59,7 @@
       "fixed": true
     },
     "aeff_coszen_par": {
-      "value": {
-        "nue": "lambda cz: 0.078*np.abs(cz)**1.190 + 0.964",
-        "numu": "lambda cz: -0.114 * np.abs(cz)**2.811 + 1.029",
-        "nutau": "lambda cz: 0.048 * np.abs(cz)**4.523 + 0.990",
-        "NC": "lambda cz: 0.101 * np.abs(cz)**1.817 + 0.963"
-      },
+      "value": "aeff/V36/V36_aeff_cz.json",
       "fixed": true
     },
     "aeff_weight_file": {
@@ -82,6 +77,10 @@
     },
     "reco_vbwkde_evts_file": {
       "value": "events/V36_weighted_aeff_joined_nu_nubar.hdf5",
+      "fixed": true
+    },
+    "reco_vbwkde_make_plots": {
+      "value": false,
       "fixed": true
     },
     "reco_kernel_file": {
@@ -168,7 +167,7 @@
       "range": [0.9,1.1],
       "fixed": false,
       "scale": 1.0,
-      "prior": 0.05
+      "prior": 0.1
     },
     "aeff_scale": {
       "value": 1.0,

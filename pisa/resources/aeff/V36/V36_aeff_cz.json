@@ -1,0 +1,6 @@
+{
+  "nue": "lambda cz: 0.078*np.abs(cz)**1.190 + 0.964",
+  "numu": "lambda cz: -0.114*np.abs(cz)**2.811 + 1.029",
+  "nutau": "lambda cz: 0.048*np.abs(cz)**4.523 + 0.990",
+  "NC": "lambda cz: 0.101*np.abs(cz)**1.817 + 0.963"
+}
