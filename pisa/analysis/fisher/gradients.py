@@ -89,7 +89,7 @@ def get_steps(param, grid_settings, fiducial_params):
 
 
 
-def get_hierarchy_gradients(data_tag, fiducial_maps,fiducial_params,grid_settings,store_dir):
+def get_hierarchy_gradients(data_tag, fiducial_maps, fiducial_params, grid_settings, store_dir):
   """
   Use the hierarchy interpolation between the two fiducial maps to obtain the
   gradients.
@@ -122,7 +122,7 @@ def get_hierarchy_gradients(data_tag, fiducial_maps,fiducial_params,grid_setting
 
 
 
-def get_gradients(data_tag, param,template_maker,fiducial_params,grid_settings,store_dir):
+def get_gradients(data_tag, hypo_tag, param, template_maker, fiducial_params, grid_settings, store_dir):
   """
   Use the template maker to create all the templates needed to obtain the gradients.
   """
@@ -148,7 +148,7 @@ def get_gradients(data_tag, param,template_maker,fiducial_params,grid_settings,s
   if store_dir != tempfile.gettempdir():
   	logging.info("Writing maps for parameter %s to %s"%(param,store_dir))
 
-  to_json(pmaps, os.path.join(store_dir,param+"_"+data_tag+".json"))
+  to_json(pmaps, os.path.join(store_dir, param+"_"+data_tag+"_"+hypo_tag+".json"))
 
   gradient_map = get_derivative_map(pmaps,fiducial_params[param],degree=2)
 

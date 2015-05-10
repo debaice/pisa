@@ -247,7 +247,8 @@ class PrintPlotFisher:
 
 
     def draw(self, confLevels = [0.6827, 0.9545, 0.9973], parameters=None, fontsize=16, alphaCL = .75):
-        ''' Make a nice plot with all the error ellipses
+        ''' Uses matplotlib to create a triangular plot of all the 2d (marginalised) error ellipses
+            for the specified joint confidence levels.
             - confLevels: The requested 2D confidence levels.
 	    - parameters: List of parameter names (at least 3) for which the ellipses are
 			  to be plotted (these need to exist in the underlying fisher matrix
