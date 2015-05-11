@@ -18,6 +18,8 @@ from pisa.utils.log import logging, profile
 from pisa.utils.params import get_values
 from pisa.utils.utils import Timer
 
+from pisa.analysis.stats.Maps import flatten_map
+
 
 def derivative_from_polycoefficients(coeff, loc):
     """
@@ -154,3 +156,71 @@ def get_gradients(data_tag, hypo_tag, param, template_maker, fiducial_params, gr
 
   return gradient_map
 
+
+def check_param_linearity(pmaps, prange=None, chan="no_pid", plot_hist=False, param=None):
+  """
+  Take the templates generated from different values of a systematic and produce
+  a nonlinearity distribution, by calculating a binwise nonlinearity based on
+  a linear fit to the bin entries.
+
+  Parameters
+  -----------
+  * pmaps: 	dictionary of parameter values and corresponding maps with bin counts;
+                as written out by FisherAnalysis.py (cf. get_derivative_map)
+  * prange: 	1-d list; determines which test points should be considered, i.e. only those within
+		(for the Fisher method, it is only important that each parameter be approx.
+		linear within the range corresponding to the accuracy of the experiment)
+  * channel: 	PID channel string; 'cscd', 'trck' or 'no_pid' (sum)
+  * plot_hist:  if 'true', plots nonlinearity distribution in a 1-d histogram
+  * param:	name of the parameter examined; used for histogram title
+
+  Returns
+  -----------
+  * nonlinearities: 1-d array of nonlinearity in each bin in (E, coszen)
+  """
+
+  if prange is None:
+    prange = [-np.inf, np.inf]
+  test_points = sorted([ val for val in [ p for p in pmaps.keys() ] if float(val) > prange[0] and float(val) < prange[1] ])
+  test_points_float = np.array(test_points, dtype=float)
+
+  if len(test_points)==0:
+    raise ValueError("Range %s does not contain any of the points probed. Aborting!"%prange)
+
+  # pre-shape pmaps for use with polyfit
+  bin_counts_data = np.array([ flatten_map(pmaps[val], chan=chan) for val in test_points ])
+
+  # perform a linear fit
+  linfit_params = np.polyfit(test_points_float, bin_counts_data, deg=1)
+
+  # let's create an array of fit values which has the same shape as the data
+  bin_counts_fit = []
+  for (val_idx, val) in enumerate(test_points_float):
+    bin_counts_fit.append([])
+    for (bin_idx, counts) in enumerate(bin_counts_data[val_idx]):
+      linfit = np.polyval(linfit_params[:, bin_idx], val)
+      logging.info("test point %.2f, bin %s: data %s vs. lin. fit %s"%(val, bin_idx, counts, linfit))
+      bin_counts_fit[val_idx].append(linfit)
+
+  # calculate squared deviations of data from linear fits
+  delta_data_fit = np.power(np.subtract(bin_counts_data, bin_counts_fit), 2)
+
+  # now determine the binwise contribution from each test point and normalise
+  # (reuse bin_idx, which after the last for-loop corresponds to the total number of bins)
+  nonlinearities = np.divide([ np.sum(delta_data_fit[:, i]) for i in xrange(bin_idx) ], len(test_points))
+
+  if plot_hist:
+    import matplotlib.pyplot as plt
+    plt.figure(figsize=(6,4))
+    plt.hist(nonlinearities, histtype='step', bins=20, color='k')
+    title = "Linearity"
+    if param is not None: title += " of %s"%param
+    if prange is not None: title += " (range: %s)"%prange
+    title += " , channel: %s"%chan
+    plt.title(title, fontsize=10)
+    plt.xlabel(r"$\chi^2/n_{\mathrm{points}}$")
+    plt.ylabel("frequency")
+    plt.tight_layout()
+    plt.show()
+
+  return nonlinearities

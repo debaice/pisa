@@ -56,6 +56,7 @@ def get_fisher_matrices(template_settings, grid_settings, minimizer_settings=Non
 
   # Get the parameters
   orig_params = template_settings['params'].copy()
+  bins = template_settings['binning'].copy()
   # Artifically add the hierarchy parameter to the list of parameters.
   # The method get_hierarchy_gradients below will know how to deal with it.
   # Note: this parameter is only relevant for the mass hierarchy
@@ -68,7 +69,8 @@ def get_fisher_matrices(template_settings, grid_settings, minimizer_settings=Non
   # When fitting for the opposite hierarchy, keep all parameters
   # except theta23, which exhibits the largest bias, plus deltam31 fixed.
   alt_mh_fit_params = fix_non_atm_params(orig_params)
-  bins = template_settings['binning']
+
+  minimize = False
 
   chosen_data = []
   if true_imh:
@@ -84,7 +86,6 @@ def get_fisher_matrices(template_settings, grid_settings, minimizer_settings=Non
       if minimizer_settings is None:
         logging.warn(""" A Fisher matrix is about to be built assuming hierarchy mis-id, but will """
                      """ be evaluated at the a-priori best fit values. Is this really what you want? """)
-        minimize = False
       else:
         minimize = True
     if hypo_imh:
