@@ -12,14 +12,14 @@ import numpy as np
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 import tempfile
 import os
+from itertools import product
 
 from pisa.utils.log import logging, profile, physics, set_verbosity
 from pisa.utils.jsons import from_json,to_json
-from pisa.utils.params import select_hierarchy, get_free_params, get_values
+from pisa.utils.params import select_hierarchy, get_free_params, get_values, fix_non_atm_params
 from pisa.utils.utils import Timer
 
 from pisa.analysis.llr.LLHAnalysis import find_max_llh_bfgs
-from pisa.analysis.llr.RunAltMHFit import fixAllButTheta23, getAsimovParams
 from pisa.analysis.TemplateMaker import TemplateMaker
 from pisa.analysis.stats.Maps import flatten_map
 
@@ -66,17 +66,15 @@ def get_fisher_matrices(template_settings, grid_settings, minimizer_settings=Non
   orig_params['hierarchy_ih'] = { "value": 0., "range": [0., 1.],
                                   "fixed": False, "prior": None}
   # When fitting for the opposite hierarchy, keep all parameters
-  # except theta23, which exhibits the largest bias, fixed (for now).
-  alt_mh_fit_params = fixAllButTheta23(orig_params)
+  # except theta23, which exhibits the largest bias, plus deltam31 fixed.
+  alt_mh_fit_params = fix_non_atm_params(orig_params)
   bins = template_settings['binning']
 
   chosen_data = []
   if true_imh:
     chosen_data.append(('IMH', False))
-    logging.info("Fisher matrix will be built for true IMH.")
   if true_nmh:
     chosen_data.append(('NMH', True))
-    logging.info("Fisher matrix will be built for true NMH.")
   if chosen_data == []:
     # In this case, only the fiducial maps (for both hierarchies) will be written
     logging.info("No Fisher matrices will be built.")
@@ -91,13 +89,14 @@ def get_fisher_matrices(template_settings, grid_settings, minimizer_settings=Non
         minimize = True
     if hypo_imh:
       hypos.append(('IMH', False))
-      logging.info("Fisher matrix will be built for hypo IMH.")
     if hypo_nmh:
       hypos.append(('NMH', True))
-      logging.info("Fisher matrix will be built for hypo NMH.")
     if hypos == []:
       logging.info("No hierarchy hypothesis specified! Aborting.")
       return
+
+  # report on data/hypo combinations selected
+  logging.info("Fisher matrices will be built for the combinations %s."%[("(truth %s, hypo %s)"%(t[0], h[0])) for (t, h) in product(chosen_data, hypos)])
 
   # There is no sense in performing any of the following steps if no Fisher matrices are to be built
   # and no templates are to be saved.
@@ -151,73 +150,74 @@ def get_fisher_matrices(template_settings, grid_settings, minimizer_settings=Non
     # Calculate Fisher matrices for the user-defined cases (NHM true and/or IMH true)
     # TODO: if no optimisation is requested, then it does not matter whether data and hypothesis
     # coincide -> only need to run Fisher method twice!
-    for truth, true_normal in chosen_data:
-      for hypo, hypo_normal in hypos:
-        logging.info("Running Fisher analysis for true %s, hypo %s."%(truth, hypo))
-        if hypo!=truth and minimize:
-          asimov_fmap = flatten_map(fiducial_maps[truth], chan='all')
-          logging.info("Finding best fit.")
-	  profile.info("start minimising")
-          max_data = find_max_llh_bfgs(asimov_fmap, template_maker, alt_mh_fit_params,
-                                       minimizer_settings, save_steps=False, normal_hierarchy=hypo_normal,
-                                       check_octant=False)
-          profile.info("stop minimising")
-	  # generate new alt. hierarchy fiducial Asimov data set from best fit values
-          # fiducial model for Fisher matrix (PINGU best-fit for theta23)
-	  fisher_eval_params = getAsimovParams(orig_params, hypo_normal, max_data['theta23'][0])
+    for ((truth, true_normal), (hypo, hypo_normal)) in product(chosen_data, hypos):
+      logging.info("Running Fisher analysis for true %s, hypo %s."%(truth, hypo))
+      if hypo!=truth and minimize:
+        asimov_fmap = flatten_map(fiducial_maps[truth], chan='all')
+        logging.info("Finding best fit.")
+        profile.info("start minimising")
+        max_data = find_max_llh_bfgs(asimov_fmap, template_maker, alt_mh_fit_params,
+                                     minimizer_settings, save_steps=False, normal_hierarchy=hypo_normal,
+                                     check_octant=False)
+        profile.info("stop minimising")
+        # generate new alt. hierarchy fiducial Asimov data set from best fit values
+        # fiducial model for Fisher matrix (PINGU best-fit for theta23, deltam31)
+        fisher_eval_params = select_hierarchy(orig_params, normal_hierarchy=hypo_normal)
+        max_data.pop('llh')
+        for p in max_data.keys():
+          fisher_eval_params[p]['value'] = max_data[p][0]
+      else:
+        # either the assumed hierarchy corresponds to the injected one or minimisation wasn't requested,
+        # in any case, we simply take the template settings as our fiducial model
+        fisher_eval_params = select_hierarchy(orig_params, hypo_normal)
+        if hypo==truth:
+          del fisher_eval_params['hierarchy']
+        # The fiducial params are selected from the hierarchy case that does NOT match
+        # the data, as we are varying from this model to find the 'best fit'
+        # fiducial_params = select_hierarchy(params,not data_normal)
 
-	else:
-          # either the assumed hierarchy corresponds to the injected one or minimisation wasn't requested,
-          # in any case, we simply take the template settings as our fiducial model
-	  fisher_eval_params = select_hierarchy(orig_params, hypo_normal)
-          if hypo==truth:
-            del fisher_eval_params['hierarchy']
-          # The fiducial params are selected from the hierarchy case that does NOT match
-          # the data, as we are varying from this model to find the 'best fit'
-          # fiducial_params = select_hierarchy(params,not data_normal)
-
-        # Get the free parameters (i.e. those for which the gradients should be calculated)
-        # free_params = select_hierarchy(get_free_params(params),not data_normal)
-        free_params = get_free_params(fisher_eval_params)
-        gradient_maps = {}
-        for param in free_params.keys():
-          # Special treatment for the hierarchy parameter
-          if param=='hierarchy':
-            # we don't need to pass hypo here, since hierarchy parameter only present
-            # when data!=hypo
-            gradient_maps[param] = get_hierarchy_gradients("data_"+truth,
-                                                           fiducial_maps,
-						           fisher_eval_params,
-						           grid_settings,
-						           store_dir,
-						           )
-          else:
-            gradient_maps[param] = get_gradients("data_"+truth,
-                                                 "hypo_"+hypo,
-					         param,
-                                                 template_maker,
-                                                 fisher_eval_params,
-                                                 grid_settings,
-                                                 store_dir
-                                                 )
-
-        logging.info("Building Fisher matrix.")
-
-        # Build Fisher matrices for the given hierarchy
-        # need to create best fit fiducial map first if optimisation performed
-        if minimize:
-          alt_mh_asimov_fmap = template_maker.get_template(get_values(fisher_eval_params), return_stages=False)
-          fisher[truth][hypo] = build_fisher_matrix(gradient_maps, alt_mh_asimov_fmap, fisher_eval_params)
+      # Get the free parameters (i.e. those for which the gradients should be calculated)
+      # free_params = select_hierarchy(get_free_params(params),not data_normal)
+      free_params = get_free_params(fisher_eval_params)
+      gradient_maps = {}
+      for param in free_params.keys():
+        # Special treatment for the hierarchy parameter
+        if param=='hierarchy':
+          # we don't need to pass hypo here, since hierarchy parameter only present
+          # when data!=hypo anyway
+          gradient_maps[param] = get_hierarchy_gradients("data_"+truth,
+                                                         fiducial_maps,
+                                                         fisher_eval_params,
+						         grid_settings,
+						         store_dir,
+						         )
         else:
-          fisher[truth][hypo] = build_fisher_matrix(gradient_maps, fiducial_maps['NMH'] if hypo_normal else fiducial_maps['IMH'], fisher_eval_params)
+          gradient_maps[param] = get_gradients("data_"+truth,
+                                               "hypo_"+hypo,
+                                               param,
+                                               template_maker,
+                                               fisher_eval_params,
+                                               grid_settings,
+                                               store_dir
+                                               )
 
-        # If Fisher matrices exist for both channels, add the matrices to obtain the combined one.
-        if len(fisher[truth][hypo].keys()) > 1:
-          fisher[truth][hypo]['comb'] = FisherMatrix(matrix=np.array([f.matrix for f in fisher[truth][hypo].itervalues()]).sum(axis=0),
-                                                    parameters=gradient_maps.keys(),  #order is important here!
-                                                    best_fits=[fisher_eval_params[par]['value'] for par in gradient_maps.keys()],
-                                                    priors=[fisher_eval_params[par]['prior'] for par in gradient_maps.keys()],
-                                                    )
+      logging.info("Building Fisher matrix.")
+
+      # Build Fisher matrices for the given hierarchy
+      # need to create best fit fiducial map first if optimisation performed
+      if minimize:
+        alt_mh_asimov_fmap = template_maker.get_template(get_values(fisher_eval_params), return_stages=False)
+        fisher[truth][hypo] = build_fisher_matrix(gradient_maps, alt_mh_asimov_fmap, fisher_eval_params)
+      else:
+        fisher[truth][hypo] = build_fisher_matrix(gradient_maps, fiducial_maps['NMH'] if hypo_normal else fiducial_maps['IMH'], fisher_eval_params)
+
+      # If Fisher matrices exist for both channels, add the matrices to obtain the combined one.
+      if len(fisher[truth][hypo].keys()) > 1:
+        fisher[truth][hypo]['comb'] = FisherMatrix(matrix=np.array([f.matrix for f in fisher[truth][hypo].itervalues()]).sum(axis=0),
+                                                   parameters=gradient_maps.keys(),  #order is important here!
+                                                   best_fits=[fisher_eval_params[par]['value'] for par in gradient_maps.keys()],
+                                                   priors=[fisher_eval_params[par]['prior'] for par in gradient_maps.keys()],
+                                                   )
     return fisher
 
   else:
