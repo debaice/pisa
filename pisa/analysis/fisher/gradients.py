@@ -181,25 +181,39 @@ def check_param_linearity(pmaps, prange=None, chan="no_pid", plot_hist=False, pa
 
   if prange is None:
     prange = [-np.inf, np.inf]
-  test_points = sorted([ val for val in [ p for p in pmaps.keys() ] if float(val) > prange[0] and float(val) < prange[1] ])
-  test_points_float = np.array(test_points, dtype=float)
 
-  if len(test_points)==0:
-    raise ValueError("Range %s does not contain any of the points probed. Aborting!"%prange)
+  if len(pmaps.keys())<3:
+    raise RuntimeError("It seems less than n=3 points were evaluated! Consider rerunning the Fisher analysis with n>2 and then come back here.")
+
+  test_points = np.array(sorted([ float(val) for val in pmaps.keys() ]))
+  npoints = len(test_points)
+
+  npoints_in_range = 0
+  for val in test_points:
+    if val >= prange[0] and val <= prange[1]:
+      npoints_in_range+=1
+
+  if npoints_in_range < 3:
+    prange = [test_points[npoints/2-1], test_points[npoints/2+1]]
+    logging.warn("Range contains less than 3 of the points probed. Expanded to %s."%prange)
+
+  test_points_in_range = np.array([val for val in test_points if val >= prange[0] and val <= prange[1] ])
+  # keep the strings for accessing the corresponding dict entries in pmaps
+  test_points_in_range_str = np.array(sorted([val for val in pmaps.keys() if float(val) >= prange[0] and float(val) <= prange[1] ]))
 
   # pre-shape pmaps for use with polyfit
-  bin_counts_data = np.array([ flatten_map(pmaps[val], chan=chan) for val in test_points ])
+  bin_counts_data = np.array([ flatten_map(pmaps[val], chan=chan) for val in test_points_in_range_str ])
 
   # perform a linear fit
-  linfit_params = np.polyfit(test_points_float, bin_counts_data, deg=1)
+  linfit_params = np.polyfit(test_points_in_range, bin_counts_data, deg=1)
 
   # let's create an array of fit values which has the same shape as the data
   bin_counts_fit = []
-  for (val_idx, val) in enumerate(test_points_float):
+  for (val_idx, val) in enumerate(test_points_in_range):
     bin_counts_fit.append([])
     for (bin_idx, counts) in enumerate(bin_counts_data[val_idx]):
       linfit = np.polyval(linfit_params[:, bin_idx], val)
-      logging.info("test point %.2f, bin %s: data %s vs. lin. fit %s"%(val, bin_idx, counts, linfit))
+      logging.trace("test point %.2f, bin %s: data %s vs. lin. fit %s"%(val, bin_idx, counts, linfit))
       bin_counts_fit[val_idx].append(linfit)
 
   # calculate squared deviations of data from linear fits
@@ -207,7 +221,7 @@ def check_param_linearity(pmaps, prange=None, chan="no_pid", plot_hist=False, pa
 
   # now determine the binwise contribution from each test point and normalise
   # (reuse bin_idx, which after the last for-loop corresponds to the total number of bins)
-  nonlinearities = np.divide([ np.sum(delta_data_fit[:, i]) for i in xrange(bin_idx) ], len(test_points))
+  nonlinearities = np.divide([ np.sum(delta_data_fit[:, i]) for i in xrange(bin_idx) ], len(test_points_in_range))
 
   if plot_hist:
     import matplotlib.pyplot as plt
@@ -215,7 +229,7 @@ def check_param_linearity(pmaps, prange=None, chan="no_pid", plot_hist=False, pa
     plt.hist(nonlinearities, histtype='step', bins=20, color='k')
     title = "Linearity"
     if param is not None: title += " of %s"%param
-    if prange is not None: title += " (range: %s)"%prange
+    title += " (range: [%.5f, %.5f])"%(min(test_points_in_range), max(test_points_in_range))
     title += " , channel: %s"%chan
     plt.title(title, fontsize=10)
     plt.xlabel(r"$\chi^2/n_{\mathrm{points}}$")
