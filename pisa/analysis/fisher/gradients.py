@@ -141,7 +141,7 @@ def get_gradients(data_tag, hypo_tag, param, template_maker, fiducial_params, gr
       with Timer() as t:
           maps = template_maker.get_template(
               get_values(dict(fiducial_params,**{param:dict(fiducial_params[param],
-                                                            **{'value': param_value})})))
+                                                            **{'value': float(param_value)})})))
       profile.info("==> elapsed time for template: %s sec"%t.secs)
 
       pmaps[param_value] = maps
