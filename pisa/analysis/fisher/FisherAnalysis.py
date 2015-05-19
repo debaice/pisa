@@ -67,9 +67,16 @@ def get_fisher_matrices(template_settings, grid_settings, minimizer_settings=Non
   orig_params['hierarchy_ih'] = { "value": 0., "range": [0., 1.],
                                   "fixed": False, "prior": None}
   # When fitting for the opposite hierarchy, keep all parameters
-  # except theta23, which exhibits the largest bias, plus deltam31 fixed.
-  alt_mh_fit_params = fix_non_atm_params(orig_params)
-
+  # except theta23, which exhibits the largest bias, plus deltam31 fixed:
+  # alt_mh_fit_params = fix_non_atm_params(orig_params)
+  
+  # fit all:
+  alt_mh_fit_params = {}
+  for key, value in orig_params.items():
+    alt_mh_fit_params[key] = value.copy()
+    if 'hierarchy' in key:
+      alt_mh_fit_params[key]['fixed'] = True
+  
   minimize = False
 
   chosen_data = []
@@ -111,8 +118,10 @@ def get_fisher_matrices(template_settings, grid_settings, minimizer_settings=Non
 
     profile.info("stop initializing\n")
 
+    """
     # Generate fiducial templates for both hierarchies (needed for partial derivatives
     # w.r.t. hierarchy parameter)
+    # TODO: When minimising, we need to regenerate the fiducial template for the hierarchy that is fit
     fiducial_maps = {}
     for hierarchy in ['NMH','IMH']:
 
@@ -143,7 +152,7 @@ def get_fisher_matrices(template_settings, grid_settings, minimizer_settings=Non
       elif save_templates:
         logging.info("Writing fiducial map (final stage) for %s to %s."%(hierarchy,outdir))
         to_json(fiducial_maps[hierarchy], os.path.join(outdir, "fid_map_"+hierarchy+".json"))
-
+    """
     # Get_gradients and get_hierarchy_gradients will both (temporarily)
     # store the templates used to generate the gradient maps
     store_dir = outdir if save_templates else tempfile.gettempdir()
@@ -152,7 +161,18 @@ def get_fisher_matrices(template_settings, grid_settings, minimizer_settings=Non
     # TODO: if no optimisation is requested, then it does not matter whether data and hypothesis
     # coincide -> only need to run Fisher method twice!
     for ((truth, true_normal), (hypo, hypo_normal)) in product(chosen_data, hypos):
+      fiducial_maps = {}
       logging.info("Running Fisher analysis for true %s, hypo %s."%(truth, hypo))
+      logging.info("Generating fiducial templates for %s."%truth)
+      fiducial_params = select_hierarchy(orig_params, normal_hierarchy=true_normal)
+
+      profile.info("start template calculation")
+      with Timer() as t:
+        fid_maps = template_maker.get_template(get_values(fiducial_params),
+                                               return_stages=dump_all_stages)
+      profile.info("==> elapsed time for template: %s sec"%t.secs)
+
+      fiducial_maps[truth] = fid_maps[4] if dump_all_stages else fid_maps
       if hypo!=truth and minimize:
         asimov_fmap = flatten_map(fiducial_maps[truth], chan='all')
         logging.info("Finding best fit.")
@@ -164,18 +184,32 @@ def get_fisher_matrices(template_settings, grid_settings, minimizer_settings=Non
         # generate new alt. hierarchy fiducial Asimov data set from best fit values
         # fiducial model for Fisher matrix (PINGU best-fit for theta23, deltam31)
         fisher_eval_params = select_hierarchy(orig_params, normal_hierarchy=hypo_normal)
+        #opp_hier_params = select_hierarchy(orig_params, normal_hierarchy=hypo_normal)
         max_data.pop('llh')
         for p in max_data.keys():
           fisher_eval_params[p]['value'] = max_data[p][0]
+          #opp_hier_params[p]['value'] = max_data[p][0]
+        logging.info("Generating fiducial templates after fitting %s."%hypo)
+
       else:
         # either the assumed hierarchy corresponds to the injected one or minimisation wasn't requested,
         # in any case, we simply take the template settings as our fiducial model
         fisher_eval_params = select_hierarchy(orig_params, hypo_normal)
+        #opp_hier_params = select_hierarchy(orig_params, hypo_normal)
         if hypo==truth:
           del fisher_eval_params['hierarchy']
         # The fiducial params are selected from the hierarchy case that does NOT match
         # the data, as we are varying from this model to find the 'best fit'
         # fiducial_params = select_hierarchy(params,not data_normal)
+        logging.info("Generating fiducial templates for %s from global best fit"%hypo)
+      
+      # Generate fiducial template for hypothesis
+      profile.info("start template calculation")
+      with Timer() as t:
+        fid_maps = template_maker.get_template(get_values(fisher_eval_params),
+                                               return_stages=dump_all_stages)
+      profile.info("==> elapsed time for template: %s sec"%t.secs)
+      fiducial_maps[hypo] = fid_maps[4] if dump_all_stages else fid_maps
 
       # Get the free parameters (i.e. those for which the gradients should be calculated)
       # free_params = select_hierarchy(get_free_params(params),not data_normal)

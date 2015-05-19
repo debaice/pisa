@@ -21,6 +21,7 @@ from pisa.utils.utils import Timer
 from pisa.analysis.stats.Maps import flatten_map
 
 
+
 def derivative_from_polycoefficients(coeff, loc):
     """
     Return derivative of a polynomial of the form
@@ -157,7 +158,7 @@ def get_gradients(data_tag, hypo_tag, param, template_maker, fiducial_params, gr
   return gradient_map
 
 
-def check_param_linearity(pmaps, prange=None, chan="no_pid", plot_hist=False, param=None):
+def check_param_linearity(pmaps, prange=None, chan="no_pid", plot_hist=False, param="", plot_for_energy_bin=-1):
   """
   Take the templates generated from different values of a systematic and produce
   a nonlinearity distribution, by calculating a binwise nonlinearity based on
@@ -186,6 +187,13 @@ def check_param_linearity(pmaps, prange=None, chan="no_pid", plot_hist=False, pa
     raise RuntimeError("It seems less than n=3 points were evaluated! Consider rerunning the Fisher analysis with n>2 and then come back here.")
 
   test_points = np.array(sorted([ float(val) for val in pmaps.keys() ]))
+  
+  # get binning information, which might be needed later
+  ebins = pmaps.values()[0]['cscd']['ebins'] if 'cscd' in pmaps.values()[0] else pmaps.values()[0]['trck']['ebins']
+  czbins = pmaps.values()[0]['cscd']['czbins'] if 'cscd' in pmaps.values()[0] else pmaps.values()[0]['trck']['czbins']
+  nebins, nczbins = len(ebins)-1, len(czbins)-1
+  logging.info("%s energy and %s coszen bins detected..."%(nebins, nczbins))
+
   npoints = len(test_points)
 
   npoints_in_range = 0
@@ -207,14 +215,26 @@ def check_param_linearity(pmaps, prange=None, chan="no_pid", plot_hist=False, pa
   # perform a linear fit
   linfit_params = np.polyfit(test_points_in_range, bin_counts_data, deg=1)
 
+  # plot for first energy bin if plot_for_energy_bin = 1
+  bin_range_to_plot = range(0)
+  if plot_for_energy_bin > 0:
+    import matplotlib.pyplot as plt
+    import matplotlib.gridspec as gridspec
+    if plot_for_energy_bin <= nebins:
+      bin_range_to_plot = range((plot_for_energy_bin-1)*nczbins, nczbins*plot_for_energy_bin)
+    else:
+      bin_range_to_plot = range(0)
+
   # let's create an array of fit values which has the same shape as the data
   bin_counts_fit = []
   for (val_idx, val) in enumerate(test_points_in_range):
     bin_counts_fit.append([])
     for (bin_idx, counts) in enumerate(bin_counts_data[val_idx]):
+      #print "fitting bin %s"%bin_idx
       linfit = np.polyval(linfit_params[:, bin_idx], val)
       logging.trace("test point %.2f, bin %s: data %s vs. lin. fit %s"%(val, bin_idx, counts, linfit))
-      bin_counts_fit[val_idx].append(linfit)
+      bin_counts_fit[val_idx].append(linfit)        
+  bin_counts_fit = np.array(bin_counts_fit)
 
   # calculate squared deviations of data from linear fits
   delta_data_fit = np.power(np.subtract(bin_counts_data, bin_counts_fit), 2)
@@ -222,6 +242,24 @@ def check_param_linearity(pmaps, prange=None, chan="no_pid", plot_hist=False, pa
   # now determine the binwise contribution from each test point and normalise
   # (reuse bin_idx, which after the last for-loop corresponds to the total number of bins)
   nonlinearities = np.divide([ np.sum(delta_data_fit[:, i]) for i in xrange(bin_idx) ], len(test_points_in_range))
+
+  # generate plots for all coszen bins if energy bin was specified
+  if bin_range_to_plot != range(0):
+    figsize = (14, 10)
+    cols = 4
+    fig, axes = plt.subplots(figsize=figsize, nrows=len(bin_range_to_plot) // cols, ncols=cols, sharex=True)
+    fig.suptitle('%s,'%param + ' channel: %s,'%chan + r' $E_{\mathrm{reco}} \, \in \, [%.2f,\,%.2f]\, \mathrm{GeV}$'%(ebins[plot_for_energy_bin-1], ebins[plot_for_energy_bin]), size=16)
+    for i in bin_range_to_plot:
+      row = ((i % nczbins) // cols)
+      col = (i % nczbins) % cols
+      axes[row, col].scatter(test_points_in_range, bin_counts_data[:, i], marker='o', s=4, label='data', color='crimson')
+      axes[row, col].plot(test_points_in_range, bin_counts_fit[:, i], ls='-', label='linear fit', c='crimson')      
+      plt.setp(axes[row, col], title=r'$\cos(\theta_{\mathrm{reco}}) \, \in \, [%.2f,\, %.2f]$'%(czbins[i%nczbins], czbins[(i%nczbins)+1]))
+      axes[row, col].legend(loc='best', fontsize=8, scatterpoints=1)
+      axes[row, col].grid()
+    fig.tight_layout()
+    fig.subplots_adjust(top=0.9) 
+    plt.show()
 
   if plot_hist:
     import matplotlib.pyplot as plt
