@@ -117,7 +117,7 @@ def get_hierarchy_gradients(data_tag, chan, fiducial_maps, fiducial_params, grid
 
   gradient_map = get_derivative_map(hmap, chan, fiducial_params[chan]['hierarchy'], degree=2)
 
-  return gradient_map
+  return hmap, gradient_map
 
 
 
@@ -144,14 +144,16 @@ def get_gradients(data_tag, hypo_tag, chan, param, template_maker, fiducial_para
 
   # TODO: Reduce number of output files
   # Store the maps used to calculate partial derivatives
+  """
   if store_dir != tempfile.gettempdir():
   	logging.info("Writing maps for parameter %s to %s"%(param,store_dir))
 
   to_json(pmaps, os.path.join(store_dir, param+"_"+data_tag+"_"+hypo_tag+"_"+chan+".json"))
+  """
 
   gradient_map = get_derivative_map(pmaps, chan, fiducial_params[chan][param], degree=2)
 
-  return gradient_map
+  return pmaps, gradient_map
 
 def check_param_linearity(pmaps, prange=None, chan="no_pid", plot_hist=False, param="", plot_for_energy_bin=-1):
   """

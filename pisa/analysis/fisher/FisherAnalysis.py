@@ -15,7 +15,7 @@ import os
 from itertools import product
 
 from pisa.utils.log import logging, profile, physics, set_verbosity
-from pisa.utils.jsons import from_json,to_json
+from pisa.utils.jsons import from_json, to_json
 from pisa.utils.params import select_hierarchy, get_free_params, get_values, fix_non_atm_params
 from pisa.utils.utils import Timer
 
@@ -28,24 +28,27 @@ from pisa.analysis.fisher.BuildFisherMatrix import build_fisher_matrix
 from pisa.analysis.fisher.Fisher import FisherMatrix
 
 
-def get_fisher_matrices(template_settings, grid_settings, minimizer_settings=None, true_nmh=False, true_imh=True, hypo_nmh=True, hypo_imh=False,
-                        dump_all_stages=False, save_templates=False, outdir=None):
+def get_fisher_matrices(template_settings, grid_settings, minimizer_settings=None, separate_fit=False, true_nmh=False, true_imh=True,
+			hypo_nmh=True, hypo_imh=False, dump_all_stages=False, save_templates=False, outdir=None):
   '''
   Main function that runs the Fisher analysis for the chosen true - assumed hierarchy combinations.
 
   Parameters
   -----------
-  * template settings:	        Dictionary of settings for the template generation
-  * grid_settings:	        Dictionary of settings specifying the number of test points for each parameter
-  * minimizer_settings:	        If specified, a minimizer will determine the best fit point among the set
-				of parameters in the alternative hierarchy, which will then be used as the
-				fiducial model for the Fisher matrix.
-  * true_nmh/true_imh:		Set to 'True' to compute the case of true normal (nmh) / inverted (nmh, default) hierarchy
-  * hypo_nmh/hypo_imh:		Set to 'True' to compute the case where hierarchy is identified as normal (default) / inverted
-  * dump_all_stages:		Set to 'True' to save the expected templates at all stages for the different fiducial models
-  * save_templates:		Set to 'True' to save the final stage bin counts for the different test points for each
+  * template settings:	        dict: dictionary of settings for the template generation (required)
+  * grid_settings:	        dict: dictionary of settings specifying the number of test points for each parameter (required)
+  * minimizer_settings:		dict: dictionary of settings for the minimizer. If specified, a minimizer will determine
+				the best fit point among the set of parameters in the alternative hierarchy, which
+				will then be used as the fiducial model for the Fisher matrix.
+  * separate_fit:		bool: given channel='all' and minimizer settings are specified, will enforce separate fits
+				for the parameters in the alternative hierarchy for each final stage channel, thus allowing for
+				different fiducial models for the corresponding Fisher matrices
+  * true_nmh/true_imh:		bool: set to 'True' to compute the case of true normal (nmh) / inverted (imh, default) hierarchy
+  * hypo_nmh/hypo_imh:		bool: set to 'True' to compute the case where hierarchy is identified as normal (default) / inverted
+  * dump_all_stages:		bool: set to 'True' to save the expected templates at all stages for the different fiducial models
+  * save_templates:		bool: set to 'True' to save the final stage bin counts for the different test points for each
 				truth - hypo combination.
-  * outdir:			Directory to which to write the results
+  * outdir:			str: directory to which to write the results
 
   Returns
   -----------
@@ -78,15 +81,15 @@ def get_fisher_matrices(template_settings, grid_settings, minimizer_settings=Non
   bins = template_settings['binning'].copy()
 
   # Get the channels for which we are going to calculate a Fisher matrix
-  chan = orig_params['channel']['value']
+  orig_channel = orig_params['channel']['value']
   chans = []
-  if chan =='all':
+  if orig_channel =='all':
     chans.append('cscd')
     chans.append('trck')
-  elif chan == 'no_pid':
+  elif orig_channel == 'no_pid':
     raise NotImplementedError('No particle-id not yet implemented! Aborting...')
   else:
-    chans.append(chan)
+    chans.append(orig_channel)
   # Artifically add the hierarchy parameter to the list of parameters.
   # The method get_hierarchy_gradients below will know how to deal with it.
   # Note: this parameter is only relevant for the mass hierarchy
@@ -141,8 +144,9 @@ def get_fisher_matrices(template_settings, grid_settings, minimizer_settings=Non
   # and no templates are to be saved.
   if chosen_data!=[] or dump_all_stages or save_templates:
 
-    # Initialise return dict to hold Fisher matrices
+    # Initialise return dict to hold Fisher matrices, and also parameter maps
     fisher = { truth: { hypo: { } for hypo, hypo_normal in hypos } for truth, true_normal in chosen_data }
+    pmaps = { truth: { hypo: { chan: {} for chan in chans } for hypo, hypo_normal in hypos} for truth, true_normal in chosen_data}
 
     # Get a template maker with the settings used to initialize
     template_maker = TemplateMaker(get_values(orig_params),**bins)
@@ -175,32 +179,39 @@ def get_fisher_matrices(template_settings, grid_settings, minimizer_settings=Non
 
       if hypo!=truth and minimize:
         max_data = {c: {} for c in chans}
+        already_fit = False
         for chan in chans:
 	  # Currently, channel determines which channel is going to be used for comparing the predictions
 	  # to the data, and to get the best fit value.
 	  # For 'all', do the same as for 'cscd' or 'trck', but then add the Fisher matrices together to get the
 	  # final result.
 	  # TODO: For no_pid, simply throw both channels together, and calculate the Fisher matrix.
+	  if orig_channel == 'all' and separate_fit:
+	    alt_mh_fit_params['channel']['value'] = chan
 
-	  alt_mh_fit_params['channel']['value'] = chan
+	  if not already_fit:
+            # Get the best fit for the appropriate channel, determined by channel passed to flatten_map
+            asimov_fmap = flatten_map(fiducial_maps[truth], chan=alt_mh_fit_params['channel']['value'])
 
-	  # Get the best fit for the appropriate channel, determined by channel passed to flatten_map
-	  asimov_fmap = flatten_map(fiducial_maps[truth], chan=chan)
-	  logging.info("Finding best fit, looking at channel %s."%chan)
-	  profile.info("start minimising")
+	    logging.info("Finding best fit, looking at channel %s."%alt_mh_fit_params['channel']['value'])
+	    profile.info("start minimising")
 
-	  # Now optimise, alt_mh_fit_params have the channel information
-	  # TODO: switch to find_min_chisquare_bfgs?
-	  max_data[chan] = find_max_llh_bfgs(asimov_fmap, template_maker, alt_mh_fit_params,
-					     minimizer_settings, save_steps=False, normal_hierarchy=hypo_normal,
-					     check_octant=False)
-	  profile.info("stop minimising")
+	    # Now optimise, alt_mh_fit_params have the channel information
+	    # TODO: switch to find_min_chisquare_bfgs?
+	    md = find_max_llh_bfgs(asimov_fmap, template_maker, alt_mh_fit_params,
+					 minimizer_settings, save_steps=False, normal_hierarchy=hypo_normal,
+					 check_octant=False)
+	    profile.info("stop minimising")
+	    md.pop('llh')
 
+	    if not separate_fit:
+	      already_fit = True
+
+	  max_data[chan] = md
 	  # Generate new alt. hierarchy Asimov data set from best fit values, which is then used
 	  # as input to the Fisher matrix
 	  fisher_eval_params[chan] = select_hierarchy(orig_params, normal_hierarchy=hypo_normal)
 	  # First remove llh data, since we're only interested in the best fit values
-	  max_data[chan].pop('llh')
 	  # Define the fiducial model
 	  for p in max_data[chan].keys():
 	    fisher_eval_params[chan][p]['value'] = max_data[chan][p][0]
@@ -233,29 +244,30 @@ def get_fisher_matrices(template_settings, grid_settings, minimizer_settings=Non
 
         # Get the free parameters (i.e. those for which the gradients should be calculated)
         free_params = get_free_params(fisher_eval_params[chan])
-        gradient_maps = {}
+	gradient_maps = {}
         for param in free_params.keys():
           # Special treatment for the hierarchy parameter
           if param=='hierarchy':
             # We don't need to pass hypo here, since hierarchy parameter only present
             # when data!=hypo anyway
-            gradient_maps[param] = get_hierarchy_gradients("data_"+truth,
-							   chan,
-							   fiducial_maps,
-							   fisher_eval_params,
-							   grid_settings,
-							   store_dir,
-							   )
+            tpm, gm = get_hierarchy_gradients("data_"+truth,
+					      chan,
+					      fiducial_maps,
+					      fisher_eval_params,
+					      grid_settings,
+					      store_dir)
           else:
-            gradient_maps[param] = get_gradients("data_"+truth,
-						 "hypo_"+hypo,
-						 chan,
-						 param,
-						 template_maker,
-						 fisher_eval_params,
-						 grid_settings,
-						 store_dir
-						 )
+            tpm, gm = get_gradients("data_"+truth,
+				    "hypo_"+hypo,
+				    chan,
+				    param,
+				    template_maker,
+				    fisher_eval_params,
+				    grid_settings,
+				    store_dir)
+
+	  pmaps[truth][hypo][chan][param] = tpm
+	  gradient_maps[param]= gm
 
         logging.info("Building Fisher matrix for channel %s"%chan)
 
@@ -276,6 +288,10 @@ def get_fisher_matrices(template_settings, grid_settings, minimizer_settings=Non
 						   best_fits=[fisher_eval_params[chans[0]][par]['value'] for par in gradient_maps.keys()],
 						   priors=[fisher_eval_params[chans[0]][par]['prior'] for par in gradient_maps.keys()],
 						   )
+
+    if store_dir != tempfile.gettempdir():
+      logging.info("Storing parameter maps.")
+      to_json(pmaps, os.path.join(store_dir, "pmaps.json"))
 
     return fisher
 
@@ -306,6 +322,13 @@ if __name__ == '__main__':
                     the likelihood (posterior) maximum. Given hierarchy misidentification,
                     this maximum needs to be found first. These are the settings
                     for the optimizer (if desired).''')
+
+  parser.add_argument('--separate-fit', action='store_true',
+		     default=False, dest='fit_sep',
+		     help='''Enforces a separate fit of the alternative hierarchy parameters
+		     in each analysis channel (if channel='all'), so that each has its unique
+		     fiducial model at which the corresponding Fisher matrix is evaluated. Will
+		     only take effect if minimizer settings are provided.''')
 
   parser.add_argument('--true-nmh', action='store_true',
 		    default=False, dest='true_nmh',
@@ -358,7 +381,7 @@ if __name__ == '__main__':
   minimizer_settings = from_json(args.minimizer_settings) if args.minimizer_settings is not None else None
 
   # Get the Fisher matrices for the desired true vs. assumed hierarchy combinations and fiducial settings
-  fisher_matrices = get_fisher_matrices(template_settings, grid_settings, minimizer_settings,
+  fisher_matrices = get_fisher_matrices(template_settings, grid_settings, minimizer_settings, args.fit_sep,
                                         args.true_nmh, args.true_imh, args.hypo_nmh, args.hypo_imh,
                                         args.dump_all_stages, args.save_templates, args.outdir)
 
@@ -375,8 +398,6 @@ if __name__ == '__main__':
         else:
           outfile = os.path.join(args.outdir,fisher_basename+'_%s.json'%chan)
           logging.info("true %s, hypo %s: writing Fisher matrix for channel %s to %s"%(truth, hypo, chan, outfile))
-	# TODO: Reduce the number of output files...
-	# Save matrix for each truth - hypo - channel combination in a separate file
+        # Save matrix for each truth - hypo - channel combination in a separate file
         fisher_matrices[truth][hypo][chan].saveFile(outfile)
 
-      #fisher_matrices[truth][hypo].saveFile(os.path.join(args.outdir, fisher_basename+'.json'))
