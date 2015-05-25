@@ -69,14 +69,15 @@ def calculate_pulls(fisher, fid_maps_truth, fid_maps_hypo, gradient_maps, true_n
   return [ (pname, pull) for pname, pull in zip(f_comb.parameters, pulls.flat) ]
 
 
-def get_fisher_matrices(template_settings, grid_settings, minimizer_settings=None, separate_fit=False, true_nmh=False, true_imh=True,
-			hypo_nmh=True, hypo_imh=False, take_finite_diffs=False, return_pulls=False, dump_all_stages=False, save_templates=False, outdir=None):
+def get_fisher_matrices(template_settings, grid_settings=None, minimizer_settings=None, separate_fit=False, true_nmh=False, true_imh=True,
+			hypo_nmh=True, hypo_imh=False, take_finite_diffs=False, return_pulls=False, dump_all_stages=False, save_templates=False, outdir=None,
+			hypo_settings=None, template_maker=None):
   '''
   Main function that runs the Fisher analysis for the chosen true - assumed hierarchy combinations.
 
   Parameters
   -----------
-  * template settings:	        dict: dictionary of settings for the template generation (required)
+  * template_settings:	        dict: dictionary of settings for the template generation (required)
   * grid_settings:	        dict: dictionary of settings specifying the number of test points for each parameter (required)
   * minimizer_settings:		dict: dictionary of settings for the minimizer. If specified, a minimizer will determine
 				the best fit point among the set of parameters in the alternative hierarchy, which
@@ -123,6 +124,8 @@ def get_fisher_matrices(template_settings, grid_settings, minimizer_settings=Non
 
   # Get the channels for which we are going to calculate a Fisher matrix
   orig_channel = orig_params['channel']['value']
+  if hypo_settings!=None:
+    assert(hypo_settings['channel']['value']==orig_channel)
   chans = []
   if orig_channel =='all':
     chans.append('cscd')
@@ -191,7 +194,7 @@ def get_fisher_matrices(template_settings, grid_settings, minimizer_settings=Non
     gradient_maps = { truth: { hypo: { chan: {} for chan in chans } for hypo, hypo_normal in hypos} for truth, true_normal in chosen_data }
     pulls = { truth: { hypo: { } for hypo, hypo_normal in hypos} for truth, true_normal in chosen_data }
     # Get a template maker with the settings used to initialize
-    template_maker = TemplateMaker(get_values(orig_params),**bins)
+    template_maker = TemplateMaker(get_values(orig_params),**bins) if template_maker is None else template_maker
 
     profile.info("stop initializing\n")
 
@@ -264,7 +267,16 @@ def get_fisher_matrices(template_settings, grid_settings, minimizer_settings=Non
         # Either the assumed hierarchy corresponds to the injected one or minimisation wasn't requested.
         # In any case, we simply take the template settings as our fiducial model
         for chan in chans:
-          fisher_eval_params[chan] = select_hierarchy(orig_params, hypo_normal)
+          if hypo_settings!=None:
+	    hypo_params = hypo_settings.copy()
+	    hypo_params['hierarchy_nh'] = { "value": 1., "range": [0., 1.],
+					    "fixed": False, "prior": None}
+	    hypo_params['hierarchy_ih'] = { "value": 0., "range": [0., 1.],
+					    "fixed": False, "prior": None}
+	    fisher_eval_params[chan] = select_hierarchy(hypo_params, hypo_normal)
+	  else:
+	    fisher_eval_params[chan] = select_hierarchy(orig_params, hypo_normal)
+
           if hypo_normal==true_normal:
             # Remove the hierarchy parameter since we don't require it.
             del fisher_eval_params[chan]['hierarchy']
