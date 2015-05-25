@@ -116,15 +116,15 @@ def get_hierarchy_gradients(data_tag, chan, fiducial_maps, fiducial_params, grid
     # Superpose bin counts (fiducial maps for different channels within same hierarchy
     # possibly generated assuming different parameter values)
     if data_tag == 'data_NMH':
-      hmap[h]['map'] = fiducial_maps['NMH'][chan]['map']*h + fiducial_maps['IMH'][chan][chan]['map']*(1.-h)
+      hmap[h]['map'] = fiducial_maps[data_tag][chan]['map']*h + fiducial_maps['hypo_IMH'][chan]['map']*(1.-h)
       # Obtain binning from one of the maps, since identical by construction (cf. FisherAnalysis)
-      hmap[h]['ebins'] = fiducial_maps['NMH'][chan]['ebins']
-      hmap[h]['czbins'] = fiducial_maps['NMH'][chan]['czbins']
+      hmap[h]['ebins'] = fiducial_maps[data_tag][chan]['ebins']
+      hmap[h]['czbins'] = fiducial_maps[data_tag][chan]['czbins']
     elif data_tag == 'data_IMH':
-      hmap[h]['map'] = fiducial_maps['NMH'][chan][chan]['map']*h + fiducial_maps['IMH'][chan]['map']*(1.-h)
+      hmap[h]['map'] = fiducial_maps['hypo_NMH'][chan]['map']*h + fiducial_maps[data_tag][chan]['map']*(1.-h)
       # Obtain binning from one of the maps, since identical by construction (cf. FisherAnalysis)
-      hmap[h]['ebins'] = fiducial_maps['IMH'][chan]['ebins']
-      hmap[h]['czbins'] = fiducial_maps['IMH'][chan]['czbins']
+      hmap[h]['ebins'] = fiducial_maps[data_tag][chan]['ebins']
+      hmap[h]['czbins'] = fiducial_maps[data_tag][chan]['czbins']
 
 
   # TODO: give hmap the same structure as pmaps?
