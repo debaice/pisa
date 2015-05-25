@@ -40,7 +40,7 @@ def derivative_from_polycoefficients(coeff, loc):
     return result
 
 
-def get_derivative_map(data, chan, fiducial=None , degree=2):
+def get_derivative_map(data, chan, fiducial=None, take_finite_diffs=False, degree=2):
   """
   Get the approximate derivative of data w.r.t parameter par
   at location loc with polynomic degree of approximation, default: 2.
@@ -60,32 +60,47 @@ def get_derivative_map(data, chan, fiducial=None , degree=2):
   derivative_map = {}
   test_points = sorted(data.keys())
 
-  # Flatten data map for use with polyfit
+  # Flatten data map (for use with polyfit)
   channel_data = [ np.array(data[pvalue]['map']).flatten() for pvalue in test_points ]
-  # Polynomial fit of bin counts
-  channel_fit_params = np.polyfit(test_points, channel_data, deg=degree)
-  # Get partial derivatives at fiducial values
-  derivative_map['map'] = derivative_from_polycoefficients(channel_fit_params[::-1], fiducial['value'])
+
+  if take_finite_diffs:
+    assert(len(test_points)==2)
+    # we only have 2 test points
+    del_x = float(test_points[1]) - float(test_points[0])
+    del_counts = np.subtract( channel_data[1], channel_data[0])
+    derivative_map['map'] = np.divide(del_counts, del_x)
+
+  else:
+    # perform a fit, with number of test points specified by grid settings file
+    # Polynomial fit of bin counts
+    channel_fit_params = np.polyfit(test_points, channel_data, deg=degree)
+    # Get partial derivatives at fiducial values
+    derivative_map['map'] = derivative_from_polycoefficients(channel_fit_params[::-1], fiducial['value'])
 
   return derivative_map
 
 
-def get_steps(param, grid_settings, fiducial_params):
+def get_steps(param, grid_settings, fiducial_params, take_finite_diffs=False):
   """
   Prepare the linear sequence of test points: use a globally valid
   number of test points if grid_settings makes no specifications
   for the parameter.
   """
-  try:
-    n_points = grid_settings['npoints'][param]
-  except:
-    n_points = grid_settings['npoints']['default']
+  if take_finite_diffs:
+    print "taking finite diffs for parameter %s"%param
+    # ignore the grid settings, and take the bounds instead
+    return np.array( [ fiducial_params[param]['range'][0], fiducial_params[param]['range'][1] ] )
+  else:
+    try:
+      n_points = grid_settings['npoints'][param]
+    except:
+      n_points = grid_settings['npoints']['default']
 
-  return np.linspace(fiducial_params[param]['range'][0],fiducial_params[param]['range'][1],n_points)
+    return np.linspace(fiducial_params[param]['range'][0],fiducial_params[param]['range'][1],n_points)
 
 
 
-def get_hierarchy_gradients(data_tag, chan, fiducial_maps, fiducial_params, grid_settings, store_dir):
+def get_hierarchy_gradients(data_tag, chan, fiducial_maps, fiducial_params, grid_settings, take_finite_diffs=False):
   """
   Use the hierarchy interpolation between the two fiducial maps to obtain the
   gradients.
@@ -94,7 +109,7 @@ def get_hierarchy_gradients(data_tag, chan, fiducial_maps, fiducial_params, grid
 
   # The ranges are the same even if the channel differs, so get them from one of the channels
   # (or the only one present)
-  steps = get_steps('hierarchy', grid_settings, fiducial_params[chan])
+  steps = get_steps('hierarchy', grid_settings, fiducial_params[chan], take_finite_diffs)
 
   hmap = {step:{} for step in steps}
   for h in steps:
@@ -115,19 +130,19 @@ def get_hierarchy_gradients(data_tag, chan, fiducial_maps, fiducial_params, grid
   # TODO: give hmap the same structure as pmaps?
   # Get_derivative_map works even if 'params' and 'ebins','czbins' not in 'data'
 
-  gradient_map = get_derivative_map(hmap, chan, fiducial_params[chan]['hierarchy'], degree=2)
+  gradient_map = get_derivative_map(hmap, chan, fiducial_params[chan]['hierarchy'], take_finite_diffs, degree=2)
 
   return hmap, gradient_map
 
 
 
-def get_gradients(data_tag, hypo_tag, chan, param, template_maker, fiducial_params, grid_settings, store_dir):
+def get_gradients(data_tag, hypo_tag, chan, param, template_maker, fiducial_params, grid_settings, take_finite_diffs=False):
   """
   Use the template maker to create all the templates needed to obtain the gradients.
   """
   logging.info("Working on parameter %s."%param)
 
-  steps = get_steps(param, grid_settings, fiducial_params[chan])
+  steps = get_steps(param, grid_settings, fiducial_params[chan], take_finite_diffs)
 
   pmaps = {}
 
@@ -142,16 +157,7 @@ def get_gradients(data_tag, hypo_tag, chan, param, template_maker, fiducial_para
       profile.info("==> elapsed time for template: %s sec"%t.secs)
       pmaps[param_value] = maps[chan]
 
-  # TODO: Reduce number of output files
-  # Store the maps used to calculate partial derivatives
-  """
-  if store_dir != tempfile.gettempdir():
-  	logging.info("Writing maps for parameter %s to %s"%(param,store_dir))
-
-  to_json(pmaps, os.path.join(store_dir, param+"_"+data_tag+"_"+hypo_tag+"_"+chan+".json"))
-  """
-
-  gradient_map = get_derivative_map(pmaps, chan, fiducial_params[chan][param], degree=2)
+  gradient_map = get_derivative_map(pmaps, chan, fiducial_params[chan][param], take_finite_diffs, 2)
 
   return pmaps, gradient_map
 
@@ -182,8 +188,8 @@ def check_param_linearity(pmaps, prange=None, chan="no_pid", plot_hist=False, pa
   if prange is None:
     prange = [-np.inf, np.inf]
 
-  if len(pmaps.keys())<3:
-    raise RuntimeError("It seems less than n=3 points were evaluated! Consider rerunning the Fisher analysis with n>2 and then come back here.")
+  if len(pmaps.keys())<2:
+    raise RuntimeError("It seems less than n=2 points were evaluated! Consider rerunning the Fisher analysis with n>=2 and then come back here.")
 
   test_points = np.array(sorted([ float(val) for val in pmaps.keys() ]))
   
@@ -209,9 +215,9 @@ def check_param_linearity(pmaps, prange=None, chan="no_pid", plot_hist=False, pa
     if val >= prange[0] and val <= prange[1]:
       npoints_in_range+=1
 
-  if npoints_in_range < 3:
+  if npoints_in_range < 2:
     prange = [test_points[npoints/2-1], test_points[npoints/2+1]]
-    logging.warn("Range contains less than 3 of the points probed. Expanded to %s."%prange)
+    logging.warn("Range contains less than 2 of the points probed. Expanded to %s."%prange)
 
   test_points_in_range = np.array([val for val in test_points if val >= prange[0] and val <= prange[1] ])
   # Keep the strings for accessing the corresponding dict entries in pmaps

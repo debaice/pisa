@@ -18,6 +18,7 @@ from pisa.utils.log import logging, profile, physics, set_verbosity
 from pisa.utils.jsons import from_json, to_json
 from pisa.utils.params import select_hierarchy, get_free_params, get_values, fix_non_atm_params
 from pisa.utils.utils import Timer
+from pisa.utils.plot import delta_map
 
 from pisa.analysis.llr.LLHAnalysis import find_max_llh_bfgs
 from pisa.analysis.TemplateMaker import TemplateMaker
@@ -28,8 +29,49 @@ from pisa.analysis.fisher.BuildFisherMatrix import build_fisher_matrix
 from pisa.analysis.fisher.Fisher import FisherMatrix
 
 
+def calculate_pulls(fisher, fid_maps_truth, fid_maps_hypo, gradient_maps, true_normal, hypo_normal):
+  truth = 'NMH' if true_normal else 'IMH'
+  hypo = 'NMH' if hypo_normal else 'IMH'
+  chan = 'trck'
+  pulls = []
+  d = []
+  print fisher[truth][hypo].keys()
+  for chan_idx, chan in enumerate(fisher[truth][hypo]):
+    if chan!='comb':
+      chan_d = []
+      f = fisher[truth][hypo][chan]
+      parameters = f.parameters
+      # binwise derivatives w.r.t all parameters in this chan
+      gm = gradient_maps[truth][hypo][chan]
+      # binwise differences between truth and model in this chan
+      # [d_bin1, d_bin2, ..., d_bin780]
+      dm = np.array(delta_map(fid_maps_truth[chan], fid_maps_hypo[chan])['map']).flatten()
+      # binwise statist. uncertainties for truth
+      # [sigma_bin1, sigma_bin2, ..., sigma_bin3]
+      sigma = np.array(fid_maps_truth[chan]['map']).flatten()
+      for i, param in enumerate(parameters):
+        chan_d.append([])
+        assert(param in gm.keys())
+        d_p_binwise = np.divide( np.multiply(dm, gm[param]['map']), sigma )
+        # Sum over bins
+        d_p = d_p_binwise.sum()
+        chan_d[i] = d_p
+      d.append(chan_d)
+  # Binwise sum over (difference btw. fiducial maps times derivatives of
+  # expected bin count / statistical uncertainty of bin count), summed over channels
+  # Sum over channels (n-d vector, where n the number of systematics which are linearised)
+  d = np.sum(d, axis=0)
+
+  # This only needs to be multiplied by the (overall) Fisher matrix inverse.
+  f_comb = fisher[truth][hypo]['comb']
+  f_comb.calculateCovariance()
+  pull = np.dot(f_comb.covariance, d)
+
+  return pull
+
+
 def get_fisher_matrices(template_settings, grid_settings, minimizer_settings=None, separate_fit=False, true_nmh=False, true_imh=True,
-			hypo_nmh=True, hypo_imh=False, dump_all_stages=False, save_templates=False, outdir=None):
+			hypo_nmh=True, hypo_imh=False, take_finite_diffs=False, return_pulls=False, dump_all_stages=False, save_templates=False, outdir=None):
   '''
   Main function that runs the Fisher analysis for the chosen true - assumed hierarchy combinations.
 
@@ -146,8 +188,8 @@ def get_fisher_matrices(template_settings, grid_settings, minimizer_settings=Non
 
     # Initialise return dict to hold Fisher matrices, and also parameter maps
     fisher = { truth: { hypo: { } for hypo, hypo_normal in hypos } for truth, true_normal in chosen_data }
-    pmaps = { truth: { hypo: { chan: {} for chan in chans } for hypo, hypo_normal in hypos} for truth, true_normal in chosen_data}
-
+    pmaps = { truth: { hypo: { chan: {} for chan in chans } for hypo, hypo_normal in hypos} for truth, true_normal in chosen_data }
+    gradient_maps = { truth: { hypo: { chan: {} for chan in chans } for hypo, hypo_normal in hypos} for truth, true_normal in chosen_data }
     # Get a template maker with the settings used to initialize
     template_maker = TemplateMaker(get_values(orig_params),**bins)
 
@@ -244,7 +286,6 @@ def get_fisher_matrices(template_settings, grid_settings, minimizer_settings=Non
 
         # Get the free parameters (i.e. those for which the gradients should be calculated)
         free_params = get_free_params(fisher_eval_params[chan])
-	gradient_maps = {}
         for param in free_params.keys():
           # Special treatment for the hierarchy parameter
           if param=='hierarchy':
@@ -264,10 +305,11 @@ def get_fisher_matrices(template_settings, grid_settings, minimizer_settings=Non
 				    template_maker,
 				    fisher_eval_params,
 				    grid_settings,
-				    store_dir)
+				    take_finite_diffs
+				    )
 
 	  pmaps[truth][hypo][chan][param] = tpm
-	  gradient_maps[param]= gm
+	  gradient_maps[truth][hypo][chan][param] = gm
 
         logging.info("Building Fisher matrix for channel %s"%chan)
 
@@ -275,23 +317,29 @@ def get_fisher_matrices(template_settings, grid_settings, minimizer_settings=Non
         # Need to create best fit fiducial map first if optimisation performed
         if minimize:
           alt_mh_asimov_fmap = template_maker.get_template(get_values(fisher_eval_params[chan]), return_stages=False)
-          fisher[truth][hypo][chan] = build_fisher_matrix(gradient_maps, alt_mh_asimov_fmap, fisher_eval_params[chan], chan)
+          fisher[truth][hypo][chan] = build_fisher_matrix(gradient_maps[truth][hypo][chan], alt_mh_asimov_fmap, fisher_eval_params[chan], chan)
         else:
-          fisher[truth][hypo][chan] = build_fisher_matrix(gradient_maps, fiducial_maps['NMH'][chan] if hypo_normal else fiducial_maps['IMH'][chan], fisher_eval_params[chan], chan)
+          fisher[truth][hypo][chan] = build_fisher_matrix(gradient_maps[truth][hypo][chan], fiducial_maps['NMH'][chan] if hypo_normal else fiducial_maps['IMH'][chan], fisher_eval_params[chan], chan)
 
       # If Fisher matrices exist for both channels, add the matrices to obtain the combined one after we have created the individual ones.
       print [f for f in fisher[truth][hypo].itervalues()]
       if len(fisher[truth][hypo].keys()) > 1:
+        parameters = fisher[truth][hypo][fisher[truth][hypo].keys()[0]].parameters
         fisher[truth][hypo]['comb'] = FisherMatrix(matrix=np.array([f.matrix for f in fisher[truth][hypo].itervalues()]).sum(axis=0),
-						   parameters=gradient_maps.keys(),  #order is important here!
+						   parameters=parameters,  #order is important here!
 						   # use best_fit from one of the channels for the time being
-						   best_fits=[fisher_eval_params[chans[0]][par]['value'] for par in gradient_maps.keys()],
-						   priors=[fisher_eval_params[chans[0]][par]['prior'] for par in gradient_maps.keys()],
+						   best_fits=[fisher_eval_params[chans[0]][par]['value'] for par in parameters],
+						   priors=[fisher_eval_params[chans[0]][par]['prior'] for par in parameters],
 						   )
 
     if store_dir != tempfile.gettempdir():
       logging.info("Storing parameter maps.")
       to_json(pmaps, os.path.join(store_dir, "pmaps.json"))
+      to_json(gradient_maps, os.path.join(store_dir, "gmaps.json"))
+
+    if return_pulls:
+      # TODO: return pulls and fisher matrices
+      pass
 
     return fisher
 
@@ -382,7 +430,7 @@ if __name__ == '__main__':
 
   # Get the Fisher matrices for the desired true vs. assumed hierarchy combinations and fiducial settings
   fisher_matrices = get_fisher_matrices(template_settings, grid_settings, minimizer_settings, args.fit_sep,
-                                        args.true_nmh, args.true_imh, args.hypo_nmh, args.hypo_imh,
+                                        args.true_nmh, args.true_imh, args.hypo_nmh, args.hypo_imh, True, False,
                                         args.dump_all_stages, args.save_templates, args.outdir)
 
   # Fisher matrices are saved in any case
