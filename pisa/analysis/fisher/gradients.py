@@ -14,7 +14,7 @@ import tempfile
 import copy
 
 from pisa.utils.jsons import to_json
-from pisa.utils.log import logging, profile
+from pisa.utils.log import logging, tprofile
 from pisa.utils.params import get_values
 from pisa.utils.utils import Timer
 
@@ -100,7 +100,8 @@ def get_steps(param, grid_settings, fiducial_params, take_finite_diffs=False):
 
 
 
-def get_hierarchy_gradients(data_tag, chan, fiducial_maps, fiducial_params, grid_settings, take_finite_diffs=False):
+def get_hierarchy_gradients(data_tag, chan, fiducial_maps, fiducial_params,
+			    grid_settings, take_finite_diffs=False):
   """
   Use the hierarchy interpolation between the two fiducial maps to obtain the
   gradients.
@@ -136,7 +137,8 @@ def get_hierarchy_gradients(data_tag, chan, fiducial_maps, fiducial_params, grid
 
 
 
-def get_gradients(data_tag, hypo_tag, chan, param, template_maker, fiducial_params, grid_settings, take_finite_diffs=False):
+def get_gradients(data_tag, hypo_tag, chan, param, template_maker, fiducial_params,
+		  grid_settings, take_finite_diffs=False):
   """
   Use the template maker to create all the templates needed to obtain the gradients.
   """
@@ -154,7 +156,7 @@ def get_gradients(data_tag, hypo_tag, chan, param, template_maker, fiducial_para
           maps = template_maker.get_template(
               get_values(dict(fiducial_params[chan],**{param:dict(fiducial_params[chan][param],
                                                             **{'value': float(param_value)})})))
-      profile.info("==> elapsed time for template: %s sec"%t.secs)
+      tprofile.info("==> elapsed time for template: %s sec"%t.secs)
       pmaps[param_value] = maps[chan]
 
   gradient_map = get_derivative_map(pmaps, chan, fiducial_params[chan][param], take_finite_diffs, 2)

@@ -19,16 +19,16 @@ import numpy as np
 from itertools import product
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 
-from pisa.analysis.llr.LLHAnalysis import find_min_chisquare_bfgs
+from pisa.analysis.llr.LLHAnalysis import find_opt_bfgs
 from pisa.analysis.stats.LLHStatistics import get_binwise_chisquare
 from pisa.analysis.stats.Maps import get_asimov_fmap
 from pisa.analysis.scan.Scan import calc_steps
 from pisa.analysis.TemplateMaker import TemplateMaker
 from pisa.analysis.fisher.FisherAnalysis import get_fisher_matrices
 
-from pisa.utils.log import logging, profile, physics, set_verbosity
+from pisa.utils.log import logging, tprofile, physics, set_verbosity
 from pisa.utils.jsons import from_json,to_json
-from pisa.utils.params import get_values, select_hierarchy, fix_atm_params, get_atm_params, get_free_params, get_param_priors, get_prior_chisquare
+from pisa.utils.params import get_values, select_hierarchy, fix_atm_params, get_atm_params, get_free_params, get_param_priors#, get_prior_chisquare
 from pisa.utils.utils import Timer
 
 parser = ArgumentParser(
@@ -96,39 +96,48 @@ if args.scan_par2 is not None:
       orig_params[key]['fixed'] = True
 else:
   for key, value in orig_params.items():
+    #if 'energy_scale' in key:
+    #if 'atm_delta_index' in key:
     if 'theta23' in key:
       orig_params[key]['fixed'] = True
 
 
 with Timer() as t:
     template_maker = TemplateMaker(get_values(orig_params),**template_settings['binning'])
-profile.info("==> elapsed time to initialize templates: %s sec"%t.secs)
+tprofile.info("==> elapsed time to initialize templates: %s sec"%t.secs)
 
-data_types = [('data_NMH',True)]#, ('data_IMH',False)]
+data_types = [('data_NMH',True), ('data_IMH',False)]
 
 results = {}
 # Store for future checking:
 results['template_settings'] = template_settings
 results['grid_settings'] = grid_settings
+if minimizer_settings is not None:
+  results['minimizer_settings'] = minimizer_settings
 
+global_opt_flags = []
 for data_tag, data_normal in data_types:
   results[data_tag] = {}
 
   data_params = select_hierarchy(orig_params, normal_hierarchy=data_normal)
   asimov_data_set = get_asimov_fmap(template_maker, get_values(data_params),
-                                    chan=channel)
+                                    channel=channel)
 
   results[data_tag]['asimov_data'] = asimov_data_set
 
-  hypo_types = [('hypo_NMH',True)]#,('hypo_IMH',False)]
+  hypo_types = [('hypo_NMH',True),('hypo_IMH',False)]
   for hypo_tag, hypo_normal in hypo_types:
 
+    #if hypo_normal==data_normal:
+      #continue
     hypo_params = select_hierarchy(orig_params, normal_hierarchy=hypo_normal)
     # Calculate steps for theta23 (+ possibly additional parameter)
     if args.scan_par2 is not None:
       free_params = { 'theta23': hypo_params['theta23'], args.scan_par2: hypo_params[args.scan_par2] }
     else:
+      #free_params = { 'energy_scale': hypo_params['energy_scale'] }
       free_params = { 'theta23': hypo_params['theta23'] }
+      #free_params = { 'atm_delta_index': hypo_params['atm_delta_index'] }
 
     calc_steps( free_params, grid_settings['steps'] )
 
@@ -139,6 +148,7 @@ for data_tag, data_normal in data_types:
     steps = { key:[] for key in free_params.keys() }
     steps['chisquare'] = []
     best_fits = { key:[] for key in get_free_params((data_params))  }
+    print best_fits
 
     # Iterate over the cartesian product, and set fixed parameter to value
     for pos in product(*steplist):
@@ -154,16 +164,32 @@ for data_tag, data_normal in data_types:
 	  hypo_params_new[k]['value'] = param_val
 	  steps[k].append(param_val)
 
-      if minimizer_settings is not None:
+      if len(get_free_params(hypo_params_new).keys())==0:
+	priors = get_param_priors(get_free_params(select_hierarchy(orig_hypo_params,hypo_normal)))
+	chi2_data = {}
+	best_fits = []
+	hypo_data_set = get_asimov_fmap(template_maker, get_values(hypo_params_new),
+                                    channel=channel)
+	chi2 = get_binwise_chisquare(asimov_data_set, hypo_data_set)
+
+	chi2 += sum([ prior.chi2(opt_val)
+                      for (opt_val, prior) in zip([ opt for (p, opt) in sorted(hypo_params_new.items())], priors) ])
+
+        chi2_data['chisquare'] = [chi2]
+
+      elif minimizer_settings is not None:
         with Timer() as t:
-          chi2_data = find_min_chisquare_bfgs(asimov_data_set, template_maker, hypo_params_new,
-                                              minimizer_settings, args.save_steps,
-                                              normal_hierarchy=hypo_normal)
-        profile.info("==> elapsed time for optimizer: %s sec"%t.secs)
+          chi2_data, dict_flags = find_opt_bfgs(asimov_data_set, template_maker, hypo_params_new,
+                                    minimizer_settings, args.save_steps,
+                                    normal_hierarchy=hypo_normal, check_octant=False,
+				    metric_name='chisquare')
+        tprofile.info("==> elapsed time for optimizer: %s sec"%t.secs)
+	global_opt_flags.append(dict_flags)
 
 	# store the best fit values
 	for p in chi2_data:
 	  if p!='chisquare':
+	  #if p!='llh':
 	    best = chi2_data[p][0]
 	    best_fits[p].append(best)
 
@@ -179,7 +205,7 @@ for data_tag, data_normal in data_types:
 	for p in pulls[data_tag][hypo_tag]:
 	  best = hypo_params_new[p[0]]['value'] + p[1]
 	  min_chi2_vals[p[0]] = best
-	  #print "%s best fit: %s"%(p[0], best)
+	  print "%s best fit: %s"%(p[0], best)
           best_fits[p[0]].append(best)
 
 	# artificially add the parameter(s) scanned over to this dictionary, so
@@ -195,19 +221,23 @@ for data_tag, data_normal in data_types:
 	    min_chi2_params_new[k]['value'] = min_chi2_vals[k]
 
 	min_chi2_hypo_data_set = get_asimov_fmap(template_maker, get_values(min_chi2_params_new),
-                                    chan=channel)
+                                    channel=channel)
 	chi2_data = {}
 	chi2 = get_binwise_chisquare(asimov_data_set, min_chi2_hypo_data_set)
 	priors = get_param_priors(get_free_params(select_hierarchy(orig_hypo_params,hypo_normal)))
+	#print priors
 	#print sorted(min_chi2_vals.items()), priors
-	chi2 += sum([ get_prior_chisquare(opt_val, sigma, value)
-		      for (opt_val, (sigma, value)) in zip([ opt for (p, opt) in sorted(min_chi2_vals.items())], priors) ])
+	chi2 += sum([ prior.chi2(opt_val)
+		      for (opt_val, prior) in zip([ opt for (p, opt) in sorted(min_chi2_vals.items())], priors) ])
 	chi2_data['chisquare'] = [chi2]
-	
+
       steps['chisquare'].append(chi2_data['chisquare'][-1])
+      #steps['chisquare'].append(chi2_data['llh'][-1])
       steps['best_fits'] = best_fits
 
       results[data_tag][hypo_tag] = steps
 
 logging.warn("FINISHED. Saving to file: %s"%args.outfile)
 to_json(results,args.outfile)
+#print global_opt_flags
+#to_json(global_opt_flags, "opt_dict_flags.json")

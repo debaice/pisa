@@ -6,7 +6,7 @@
 #
 # author: Lukas Schulte - schulte@physik.uni-bonn.de
 #         Sebastian Boeser - sboeser@uni-mainz.de
-#	  Thomas Ehrhardt - tehrhard@uni-mainz.de
+#         Thomas Ehrhardt - tehrhard@uni-mainz.de
 
 import numpy as np
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
@@ -14,13 +14,14 @@ import tempfile
 import os
 from itertools import product
 
-from pisa.utils.log import logging, profile, physics, set_verbosity
-from pisa.utils.jsons import from_json, to_json
-from pisa.utils.params import select_hierarchy, get_free_params, get_values, fix_non_atm_params
+from pisa.utils.log import logging, tprofile, physics, set_verbosity
+from pisa.utils.jsons import from_json,to_json
+from pisa.analysis.TemplateMaker import TemplateMaker
+from pisa.utils.params import Prior, select_hierarchy, get_free_params, get_values
 from pisa.utils.utils import Timer
 from pisa.utils.plot import delta_map
 
-from pisa.analysis.llr.LLHAnalysis import find_max_llh_bfgs
+from pisa.analysis.llr.LLHAnalysis import find_opt_bfgs
 from pisa.analysis.TemplateMaker import TemplateMaker
 from pisa.analysis.stats.Maps import flatten_map
 
@@ -62,6 +63,7 @@ def calculate_pulls(fisher, fid_maps_truth, fid_maps_hypo, gradient_maps, true_n
 
   # This only needs to be multiplied by the (overall) Fisher matrix inverse.
   f_comb = fisher[truth][hypo]['comb']
+  print f_comb.parameters, f_comb.labels, f_comb.best_fits, f_comb.priors
   if 'hierarchy' in f_comb.parameters:
     f_comb.removeParameter('hierarchy')
   f_comb.calculateCovariance()
@@ -72,6 +74,9 @@ def calculate_pulls(fisher, fid_maps_truth, fid_maps_hypo, gradient_maps, true_n
 def get_fisher_matrices(template_settings, grid_settings=None, minimizer_settings=None, separate_fit=False, true_nmh=False, true_imh=True,
 			hypo_nmh=True, hypo_imh=False, take_finite_diffs=False, return_pulls=False, dump_all_stages=False, save_templates=False, outdir=None,
 			hypo_settings=None, template_maker=None):
+#def get_fisher_matrices(template_settings, grid_settings, IMH=True, NMH=False,
+#                        dump_all_stages=False, save_templates=False,
+#                        outdir=None):
   '''
   Main function that runs the Fisher analysis for the chosen true - assumed hierarchy combinations.
 
@@ -116,7 +121,7 @@ def get_fisher_matrices(template_settings, grid_settings=None, minimizer_setting
     logging.info("No output directory specified. Will save templates to current working directory.")
     outdir = os.getcwd()
 
-  profile.info("start initializing")
+  tprofile.info("start initializing")
 
   # Get the parameters
   orig_params = template_settings['params'].copy()
@@ -196,7 +201,7 @@ def get_fisher_matrices(template_settings, grid_settings=None, minimizer_setting
     # Get a template maker with the settings used to initialize
     template_maker = TemplateMaker(get_values(orig_params),**bins) if template_maker is None else template_maker
 
-    profile.info("stop initializing\n")
+    tprofile.info("stop initializing\n")
 
     # Get_gradients and get_hierarchy_gradients will both (temporarily)
     # store the templates used to generate the gradient maps
@@ -212,11 +217,12 @@ def get_fisher_matrices(template_settings, grid_settings=None, minimizer_setting
       logging.info("Generating fiducial templates for %s."%truth)
       fiducial_params = select_hierarchy(orig_params, normal_hierarchy=true_normal)
 
-      profile.info("start template calculation")
+      # Generate fiducial maps, either all of them or only the ultimate one
+      tprofile.info("start template calculation")
       with Timer() as t:
         fid_maps = template_maker.get_template(get_values(fiducial_params),
                                                return_stages=dump_all_stages)
-      profile.info("==> elapsed time for template: %s sec"%t.secs)
+      tprofile.info("==> elapsed time for template: %s sec"%t.secs)
 
       fiducial_maps[truth] = fid_maps[4] if dump_all_stages else fid_maps
       # The fiducial model for the Fisher matrix depends on the channel considered
@@ -236,17 +242,17 @@ def get_fisher_matrices(template_settings, grid_settings=None, minimizer_setting
 
 	  if not already_fit:
             # Get the best fit for the appropriate channel, determined by channel passed to flatten_map
-            asimov_fmap = flatten_map(fiducial_maps[truth], chan=alt_mh_fit_params['channel']['value'])
+            asimov_fmap = flatten_map(fiducial_maps[truth], channel=alt_mh_fit_params['channel']['value'])
 
 	    logging.info("Finding best fit, looking at channel %s."%alt_mh_fit_params['channel']['value'])
-	    profile.info("start minimising")
+	    tprofile.info("start minimising")
 
 	    # Now optimise, alt_mh_fit_params have the channel information
 	    # TODO: switch to find_min_chisquare_bfgs?
-	    md = find_max_llh_bfgs(asimov_fmap, template_maker, alt_mh_fit_params,
-					 minimizer_settings, save_steps=False, normal_hierarchy=hypo_normal,
-					 check_octant=False)
-	    profile.info("stop minimising")
+	    md = find_opt_bfgs(asimov_fmap, template_maker, alt_mh_fit_params,
+			       minimizer_settings, save_steps=False, normal_hierarchy=hypo_normal,
+			       check_octant=True)
+	    tprofile.info("stop minimising")
 	    md.pop('llh')
 
 	    if not separate_fit:
@@ -284,7 +290,7 @@ def get_fisher_matrices(template_settings, grid_settings=None, minimizer_setting
         logging.info("Generating fiducial templates for %s from global best fit"%hypo)
       
       # Generate fiducial template for hypothesis
-      profile.info("start template calculation")
+      tprofile.info("start template calculation")
       # We can't just NOT generate the template for the channel that is not requested (or can we?),
       # so we are forced to drag that along with us for now
       fiducial_maps[hypo] = {c: {} for c in chans}
@@ -292,7 +298,7 @@ def get_fisher_matrices(template_settings, grid_settings=None, minimizer_setting
         with Timer() as t:
           fid_maps = template_maker.get_template(get_values(fisher_eval_params[chan]),
                                                  return_stages=dump_all_stages)
-        profile.info("==> elapsed time for template: %s sec"%t.secs)
+        tprofile.info("==> elapsed time for template: %s sec"%t.secs)
         # Here, we're only interested in the final stage event numbers, which are our observables
         fiducial_maps[hypo][chan] = fid_maps[4][chan] if dump_all_stages else fid_maps[chan]
 	# Note: 'params' one level below channel, not on the same as in get_template. Also,
@@ -339,11 +345,13 @@ def get_fisher_matrices(template_settings, grid_settings=None, minimizer_setting
       # If Fisher matrices exist for both channels, add the matrices to obtain the combined one after we have created the individual ones.
       if len(fisher[truth][hypo].keys()) > 1:
         parameters = fisher[truth][hypo][fisher[truth][hypo].keys()[0]].parameters
-        fisher[truth][hypo]['comb'] = FisherMatrix(matrix=np.array([f.matrix for f in fisher[truth][hypo].itervalues()]).sum(axis=0),
-						   parameters=parameters,  #order is important here!
-						   # use best_fit from one of the channels for the time being
-						   best_fits=[fisher_eval_params[chans[0]][par]['value'] for par in parameters],
-						   priors=[fisher_eval_params[chans[0]][par]['prior'] for par in parameters],
+        fisher[truth][hypo]['comb'] = FisherMatrix(
+		matrix=np.array([f.matrix for f in fisher[truth][hypo].itervalues()]).sum(axis=0),
+		parameters=parameters,  #order is important here!
+		# use best_fit from one of the channels for the time being
+		best_fits=[fisher_eval_params[chans[0]][par]['value'] for par in parameters],
+		labels = [ par for par in parameters ],
+		priors=[Prior.from_param(fisher_eval_params[chans[0]][par]) for par in parameters],
 						   )
       if return_pulls:
 	pull = calculate_pulls(fisher, fiducial_maps[truth], fiducial_maps[hypo], gradient_maps, true_normal, hypo_normal)
@@ -458,10 +466,12 @@ if __name__ == '__main__':
       fisher_basename='fisher_%s_%s'%(truth, hypo)
       for chan in fisher_matrices[truth][hypo]:
         if chan == 'comb':
-          outfile = os.path.join(args.outdir, fisher_basename+'.json')
+          #outfile = os.path.join(args.outdir+'_'+fisher_basename+'.json')
+	  outfile = args.outdir+'_'+fisher_basename+'.json'
           logging.info("%s, %s: writing combined Fisher matrix to %s"%(truth, hypo, outfile))
         else:
-          outfile = os.path.join(args.outdir,fisher_basename+'_%s.json'%chan)
+          #outfile = os.path.join(args.outdir, fisher_basename+'_%s.json'%chan)
+	  outfile = args.outdir+'_'+fisher_basename+'_%s.json'%chan
           logging.info("%s, %s: writing Fisher matrix for channel %s to %s"%(truth, hypo, chan, outfile))
         # Save matrix for each truth - hypo - channel combination in a separate file
         fisher_matrices[truth][hypo][chan].saveFile(outfile)
