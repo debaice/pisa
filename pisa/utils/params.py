@@ -10,13 +10,11 @@
 # date:   16 October 2014
 #
 
-import re
 
 import re
 import scipy as sp
 import numpy as np
 import copy
-import logging
 
 class Prior(object):
     def __init__(self, **kwargs):
@@ -169,7 +167,7 @@ def select_hierarchy(params, normal_hierarchy):
             if normal_hierarchy: continue
             key = key.rsplit('_',1)[0]
 
-        newparams[key] = value.copy()
+        newparams[key] = value
 
     return newparams
 
@@ -299,23 +297,4 @@ def fix_all_params(params):
     for k,v in params.items():
         new_params[k] = v.copy()
         new_params[k]['fixed'] = True
-    return new_params
-
-def fix_non_atm_params(params):
-    """
-    Returns dict identical to params dict but with all params fixed
-    except for atmospheric oscillation parameters.
-    """
-    new_params = {}
-    # or initialize with new copy by dict(params)
-    #atm_params = ['deltam31','theta23']
-    for key,value in params.items():
-        new_params[key] = value.copy()
-        #for akey in atm_params:
-            #if akey not in key:
-        if (bool(re.match('^theta23', key)) or bool(re.match('^deltam31', key))):
-            new_params[key]['fixed'] = False
-        else:
-            new_params[key]['fixed'] = True
-
     return new_params

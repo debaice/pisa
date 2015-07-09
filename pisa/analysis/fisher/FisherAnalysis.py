@@ -74,9 +74,6 @@ def calculate_pulls(fisher, fid_maps_truth, fid_maps_hypo, gradient_maps, true_n
 def get_fisher_matrices(template_settings, grid_settings=None, minimizer_settings=None, separate_fit=False, true_nmh=False, true_imh=True,
 			hypo_nmh=True, hypo_imh=False, take_finite_diffs=False, return_pulls=False, dump_all_stages=False, save_templates=False, outdir=None,
 			hypo_settings=None, template_maker=None):
-#def get_fisher_matrices(template_settings, grid_settings, IMH=True, NMH=False,
-#                        dump_all_stages=False, save_templates=False,
-#                        outdir=None):
   '''
   Main function that runs the Fisher analysis for the chosen true - assumed hierarchy combinations.
 
@@ -198,6 +195,7 @@ def get_fisher_matrices(template_settings, grid_settings=None, minimizer_setting
     pmaps = { truth: { hypo: { chan: {} for chan in chans } for hypo, hypo_normal in hypos} for truth, true_normal in chosen_data }
     gradient_maps = { truth: { hypo: { chan: {} for chan in chans } for hypo, hypo_normal in hypos} for truth, true_normal in chosen_data }
     pulls = { truth: { hypo: { } for hypo, hypo_normal in hypos} for truth, true_normal in chosen_data }
+
     # Get a template maker with the settings used to initialize
     template_maker = TemplateMaker(get_values(orig_params),**bins) if template_maker is None else template_maker
 
