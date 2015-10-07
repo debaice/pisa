@@ -2,7 +2,7 @@
 #
 # RunPullMethod.py
 #
-# Scans a 1- or 2-d parameter grid (with theta23 being one of them),
+# Scans a 1- or 2-d parameter grid,
 # analytically minimising the chisquare over the other - linearised - parameters
 # by calculating the Fisher matrix at each point and determining the pulls.
 # Alternatively, can also make use of numerical minimisation at each point, which is
@@ -37,8 +37,10 @@ parser = ArgumentParser(
 parser.add_argument('-t','--template_settings',type=str,
                     metavar='JSONFILE', required = True,
                     help='''Settings related to the template generation and systematics.''')
+parser.add_argument('-p','--param-to-scan', type=str, required=True, dest='scan_par',
+		    help='''Scan this parameter.''')
 parser.add_argument('-p2','--2nd-parameter', type=str, required=False, dest='scan_par2',
-		    help='''Scan a 2-d grid, with theta23 and this parameter.''')
+		    help='''Scan a 2-d grid, including this parameter.''')
 parser.add_argument('-m','--minimizer_settings',type=str,
                     metavar='JSONFILE', required = False,
                     help='''Settings related to the optimizer used in the LLR analysis.''')
@@ -86,21 +88,23 @@ if args.gpu_id is not None:
 orig_params = template_settings['params'].copy()
 orig_hypo_params = hypo_settings['params'].copy()
 
-# Make sure that theta23 is fixed (+ possibly 2nd parameter):
-logging.warn("Ensuring that theta23 is fixed for this analysis")
+# Check whether parameter exists at all (for both hierarchies)
+if not args.scan_par in select_hierarchy(orig_hypo_params, True) or not args.scan_par in select_hierarchy(orig_hypo_params, False):
+  raise RuntimeError("Parameter %s not found. Aborting!"%args.scan_par)
+
+# Make sure that parameter to scan is fixed (+ possibly 2nd parameter):
+logging.warn("Ensuring that %s is fixed for this analysis."%args.scan_par)
 
 if args.scan_par2 is not None:
-  logging.warn("Ensuring that %s is fixed for this analysis"%args.scan_par2)
+  logging.warn("Ensuring that %s is fixed for this analysis."%args.scan_par2)
   for key, value in orig_params.items():
-    if 'theta23' in key or args.scan_par2 in key:
-      orig_params[key]['fixed'] = True
-else:
-  for key, value in orig_params.items():
-    #if 'energy_scale' in key:
-    #if 'atm_delta_index' in key:
-    if 'theta23' in key:
+    if args.scan_par in key or args.scan_par2 in key:
       orig_params[key]['fixed'] = True
 
+else:
+  for key, value in orig_params.items():
+    if args.scan_par in key:
+      orig_params[key]['fixed'] = True
 
 with Timer() as t:
     template_maker = TemplateMaker(get_values(orig_params),**template_settings['binning'])
@@ -128,16 +132,14 @@ for data_tag, data_normal in data_types:
   hypo_types = [('hypo_NMH',True),('hypo_IMH',False)]
   for hypo_tag, hypo_normal in hypo_types:
 
-    #if hypo_normal==data_normal:
-      #continue
+    if hypo_normal==data_normal:
+      continue
     hypo_params = select_hierarchy(orig_params, normal_hierarchy=hypo_normal)
-    # Calculate steps for theta23 (+ possibly additional parameter)
+    # Calculate steps for parameters
     if args.scan_par2 is not None:
-      free_params = { 'theta23': hypo_params['theta23'], args.scan_par2: hypo_params[args.scan_par2] }
+      free_params = { args.scan_par: hypo_params[args.scan_par], args.scan_par2: hypo_params[args.scan_par2] }
     else:
-      #free_params = { 'energy_scale': hypo_params['energy_scale'] }
-      free_params = { 'theta23': hypo_params['theta23'] }
-      #free_params = { 'atm_delta_index': hypo_params['atm_delta_index'] }
+      free_params = { args.scan_par: hypo_params[args.scan_par] }
 
     calc_steps( free_params, grid_settings['steps'] )
 
@@ -147,12 +149,10 @@ for data_tag, data_normal in data_types:
     # Prepare to store all the steps, chisquare values and best fits
     steps = { key:[] for key in free_params.keys() }
     steps['chisquare'] = []
-    best_fits = { key:[] for key in get_free_params((data_params))  }
-    print best_fits
+    best_fits = { key:[] for key in get_free_params(data_params)  }
 
     # Iterate over the cartesian product, and set fixed parameter to value
     for pos in product(*steplist):
-    #for step in steplist:
       print "running at ",pos
       # be cautious...
       hypo_params_new = {}
@@ -181,7 +181,7 @@ for data_tag, data_normal in data_types:
         with Timer() as t:
           chi2_data, dict_flags = find_opt_bfgs(asimov_data_set, template_maker, hypo_params_new,
                                     minimizer_settings, args.save_steps,
-                                    normal_hierarchy=hypo_normal, check_octant=False,
+                                    normal_hierarchy=hypo_normal, check_octant=True,
 				    metric_name='chisquare')
         tprofile.info("==> elapsed time for optimizer: %s sec"%t.secs)
 	global_opt_flags.append(dict_flags)
@@ -205,7 +205,7 @@ for data_tag, data_normal in data_types:
 	for p in pulls[data_tag][hypo_tag]:
 	  best = hypo_params_new[p[0]]['value'] + p[1]
 	  min_chi2_vals[p[0]] = best
-	  print "%s best fit: %s"%(p[0], best)
+	  #print "%s best fit: %s"%(p[0], best)
           best_fits[p[0]].append(best)
 
 	# artificially add the parameter(s) scanned over to this dictionary, so
@@ -234,10 +234,11 @@ for data_tag, data_normal in data_types:
       steps['chisquare'].append(chi2_data['chisquare'][-1])
       #steps['chisquare'].append(chi2_data['llh'][-1])
       steps['best_fits'] = best_fits
-
+	
       results[data_tag][hypo_tag] = steps
-
+      #	Let's not lose everything in case something goes wrong.
+      to_json(results, args.outfile)
 logging.warn("FINISHED. Saving to file: %s"%args.outfile)
-to_json(results,args.outfile)
+to_json(results, args.outfile)
 #print global_opt_flags
 #to_json(global_opt_flags, "opt_dict_flags.json")
