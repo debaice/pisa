@@ -15,6 +15,7 @@ import re
 import scipy as sp
 import numpy as np
 import copy
+from pisa.utils.log import logging
 
 class Prior(object):
     def __init__(self, **kwargs):
@@ -24,13 +25,13 @@ class Prior(object):
         kind = kwargs.pop('kind')
         # Dispatch the correct initialization method
         if kind.lower() in ['none', 'uniform'] or kind is None:
-            Prior.__init_uniform(self, **kwargs)
+            self.__init_uniform(**kwargs)
         elif kind.lower() == 'gaussian':
-            Prior.__init_gaussian(self, **kwargs)
+            self.__init_gaussian(**kwargs)
         elif kind.lower() == 'linterp':
-            Prior.__init_linterp(self, **kwargs)
+            self.__init_linterp(**kwargs)
         elif kind.lower() == 'spline':
-            Prior.__init_spline(self, **kwargs)
+            self.__init_spline(**kwargs)
         else:
             raise TypeError('Unknown Prior kind `' + str(kind) + '`')
 
@@ -189,7 +190,6 @@ def get_free_params(params):
 
     return { key: value for key, value in params.items() if not value['fixed']}
 
-
 def get_param_values(params):
     """
     Returns a list of parameter values
@@ -281,7 +281,6 @@ def fix_non_atm_params(params):
     for key,value in params.items():
         new_params[key] = value.copy()
         if (bool(re.match('^theta23', key)) or bool(re.match('^deltam31', key))):
-            #new_params[key]['fixed'] = False
             continue
         else:
             new_params[key]['fixed'] = True
