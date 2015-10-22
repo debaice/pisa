@@ -20,7 +20,7 @@ from itertools import product
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 from copy import deepcopy
 
-from pisa.analysis.llr.LLHAnalysis import find_opt_bfgs
+from pisa.analysis.llr.LLHAnalysis import find_opt_scipy
 from pisa.analysis.stats.LLHStatistics import get_binwise_chisquare
 from pisa.analysis.stats.Maps import get_asimov_fmap
 from pisa.analysis.scan.Scan import calc_steps
@@ -195,7 +195,7 @@ for data_tag, data_normal in data_types:
 
       elif minimizer_settings is not None:
         with Timer() as t:
-          chi2_data, dict_flags = find_opt_bfgs(asimov_data_set, template_maker, hypo_params_new,
+          chi2_data, dict_flags = find_opt_scipy(asimov_data_set, template_maker, hypo_params_new,
                                     minimizer_settings, args.save_steps,
                                     normal_hierarchy=hypo_normal, check_octant=True,
 				    metric_name='chisquare')

@@ -21,7 +21,7 @@ from pisa.utils.params import Prior, select_hierarchy, get_free_params, get_valu
 from pisa.utils.utils import Timer
 from pisa.utils.plot import delta_map
 
-from pisa.analysis.llr.LLHAnalysis import find_opt_bfgs
+from pisa.analysis.llr.LLHAnalysis import find_opt_scipy
 from pisa.analysis.TemplateMaker import TemplateMaker
 from pisa.analysis.stats.Maps import flatten_map
 
@@ -246,8 +246,7 @@ def get_fisher_matrices(template_settings, grid_settings=None, minimizer_setting
 	    tprofile.info("start minimising")
 
 	    # Now optimise, alt_mh_fit_params have the channel information
-	    # TODO: switch to find_min_chisquare_bfgs?
-	    md = find_opt_bfgs(asimov_fmap, template_maker, alt_mh_fit_params,
+	    md = find_opt_scipy(asimov_fmap, template_maker, alt_mh_fit_params,
 			       minimizer_settings, save_steps=False, normal_hierarchy=hypo_normal,
 			       check_octant=True)
 	    tprofile.info("stop minimising")
