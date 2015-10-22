@@ -18,6 +18,7 @@ import sys
 import numpy as np
 from itertools import product
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
+from copy import deepcopy
 
 from pisa.analysis.llr.LLHAnalysis import find_opt_bfgs
 from pisa.analysis.stats.LLHStatistics import get_binwise_chisquare
@@ -47,6 +48,11 @@ parser.add_argument('-m','--minimizer_settings',type=str,
 parser.add_argument('-g','--grid_settings',type=str,metavar='JSONFILE', required = True,
                     help='''Get chisquare at defined grid values,
                     according to these input settings.''')
+group = parser.add_mutually_exclusive_group()
+group.add_argument('--only-correct-h', action='store_true', default=False,
+		    dest='only_correct_h', help='''Only assume hierarchy is correctly identified.''')
+group.add_argument('--only-cross-h', action='store_true', default=False,
+		    dest='only_x_h', help='''Only assume hierarchy is mis-identified.''')
 parser.add_argument('-s','--save-steps',action='store_true',default=False,
                     dest='save_steps',
                     help='''Save all steps the optimizer takes.''')
@@ -84,12 +90,11 @@ if args.gpu_id is not None:
   template_settings['params']['gpu_id']['value'] = args.gpu_id
   template_settings['params']['gpu_id']['fixed'] = True
 
-# Get the parameters
-orig_params = template_settings['params'].copy()
-orig_hypo_params = hypo_settings['params'].copy()
+# Get the parameters, but make sure to keep template settings untouched
+orig_params = deepcopy(template_settings['params'])
 
 # Check whether parameter exists at all (for both hierarchies)
-if not args.scan_par in select_hierarchy(orig_hypo_params, True) or not args.scan_par in select_hierarchy(orig_hypo_params, False):
+if not args.scan_par in select_hierarchy(template_settings['params'], True) or not args.scan_par in select_hierarchy(template_settings['params'], False):
   raise RuntimeError("Parameter %s not found. Aborting!"%args.scan_par)
 
 # Make sure that parameter to scan is fixed (+ possibly 2nd parameter):
@@ -123,7 +128,7 @@ global_opt_flags = []
 for data_tag, data_normal in data_types:
   results[data_tag] = {}
 
-  data_params = select_hierarchy(orig_params, normal_hierarchy=data_normal)
+  data_params = select_hierarchy(template_settings['params'], normal_hierarchy=data_normal)
   asimov_data_set = get_asimov_fmap(template_maker, get_values(data_params),
                                     channel=channel)
 
@@ -131,23 +136,29 @@ for data_tag, data_normal in data_types:
 
   hypo_types = [('hypo_NMH',True),('hypo_IMH',False)]
   for hypo_tag, hypo_normal in hypo_types:
+    if args.only_x_h:
+	if hypo_normal==data_normal:
+	  continue
+    if args.only_correct_h:
+	if hypo_normal!=data_normal:
+	  continue
 
-    if hypo_normal==data_normal:
-      continue
+    # The parameters that are to be scanned will be fixed in here:
     hypo_params = select_hierarchy(orig_params, normal_hierarchy=hypo_normal)
+
     # Calculate steps for parameters
     if args.scan_par2 is not None:
-      free_params = { args.scan_par: hypo_params[args.scan_par], args.scan_par2: hypo_params[args.scan_par2] }
+      scan_params = { args.scan_par: hypo_params[args.scan_par], args.scan_par2: hypo_params[args.scan_par2] }
     else:
-      free_params = { args.scan_par: hypo_params[args.scan_par] }
+      scan_params = { args.scan_par: hypo_params[args.scan_par] }
 
-    calc_steps( free_params, grid_settings['steps'] )
+    calc_steps( scan_params, grid_settings['steps'] )
 
     # Build a list from all parameters that holds a list of (name, step) tuples
-    steplist = [ [(name, step) for step in free_params[name]['steps']] for name in sorted(free_params.keys()) ]
+    steplist = [ [(name, step) for step in scan_params[name]['steps']] for name in sorted(scan_params.keys()) ]
 
     # Prepare to store all the steps, chisquare values and best fits
-    steps = { key:[] for key in free_params.keys() }
+    steps = { key:[] for key in scan_params.keys() }
     steps['chisquare'] = []
     best_fits = { key:[] for key in get_free_params(data_params)  }
 
@@ -158,22 +169,27 @@ for data_tag, data_normal in data_types:
       hypo_params_new = {}
       for (k, v) in hypo_params.items():
 	hypo_params_new[k]=v.copy()
-	if k in free_params.keys():
-	  hypo_params_new[k]['fixed'] = True
-	  param_val = pos[sorted(free_params.keys()).index(k)][1]
+	# now adjust the values of the parameters to be scanned
+	if k in scan_params.keys():
+	  param_val = pos[sorted(scan_params.keys()).index(k)][1]
+	  print "fixing %s to %.2f"%(k,param_val)
 	  hypo_params_new[k]['value'] = param_val
 	  steps[k].append(param_val)
 
       if len(get_free_params(hypo_params_new).keys())==0:
-	priors = get_param_priors(get_free_params(select_hierarchy(orig_hypo_params,hypo_normal)))
+	# Note: The parameters that are scanned need to have "fixed" set to false in template settings!
+	priors = { param: prior for (param, prior) in 
+					zip (sorted(get_free_params(select_hierarchy(template_settings['params'], hypo_normal)).keys()),
+					     get_param_priors(get_free_params(select_hierarchy(template_settings['params'], hypo_normal))))
+		 }
 	chi2_data = {}
 	best_fits = []
 	hypo_data_set = get_asimov_fmap(template_maker, get_values(hypo_params_new),
                                     channel=channel)
-	chi2 = get_binwise_chisquare(asimov_data_set, hypo_data_set)
 
-	chi2 += sum([ prior.chi2(opt_val)
-                      for (opt_val, prior) in zip([ opt for (p, opt) in sorted(hypo_params_new.items())], priors) ])
+	chi2 = get_binwise_chisquare(asimov_data_set, hypo_data_set)
+	chi2 += sum([ priors[param].chi2(hypo_params_new[param]['value'])
+                      for param in priors.keys() ])
 
         chi2_data['chisquare'] = [chi2]
 
@@ -205,13 +221,12 @@ for data_tag, data_normal in data_types:
 	for p in pulls[data_tag][hypo_tag]:
 	  best = hypo_params_new[p[0]]['value'] + p[1]
 	  min_chi2_vals[p[0]] = best
-	  #print "%s best fit: %s"%(p[0], best)
           best_fits[p[0]].append(best)
 
 	# artificially add the parameter(s) scanned over to this dictionary, so
 	# we can add the prior penalty terms for these
 
-	for scanned_par in free_params:
+	for scanned_par in scan_params:
 	  min_chi2_vals[scanned_par] = hypo_params_new[scanned_par]['value']
 
 	min_chi2_params_new = { }
@@ -224,7 +239,7 @@ for data_tag, data_normal in data_types:
                                     channel=channel)
 	chi2_data = {}
 	chi2 = get_binwise_chisquare(asimov_data_set, min_chi2_hypo_data_set)
-	priors = get_param_priors(get_free_params(select_hierarchy(orig_hypo_params,hypo_normal)))
+	priors = get_param_priors(get_free_params(select_hierarchy(template_settings['params'],hypo_normal)))
 	#print priors
 	#print sorted(min_chi2_vals.items()), priors
 	chi2 += sum([ prior.chi2(opt_val)
