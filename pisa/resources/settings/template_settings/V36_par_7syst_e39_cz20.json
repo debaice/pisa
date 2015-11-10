@@ -212,8 +212,8 @@
       "prior": null
     },
     "YeO": {
-      "value": 0.4656,
-      "range": [0.46,0.47],
+      "value": 0.4720,
+      "range": [0.46,0.475],
       "fixed": false,
       "scale": 1.0,
       "prior": null

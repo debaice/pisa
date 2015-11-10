@@ -131,7 +131,7 @@
         0.47
       ],
       "scale": 1.0,
-      "value": 0.4957
+      "value": 0.4656
     },
     "aeff_coszen_par": {
       "fixed": true,
@@ -155,7 +155,7 @@
       "value": "param"
     },
     "aeff_scale": {
-      "fixed": true,
+      "fixed": false,
       "prior": {
         "kind": "uniform"
       },
@@ -171,7 +171,7 @@
       "value": null
     },
     "atm_delta_index": {
-      "fixed": true,
+      "fixed": false,
       "prior": {
         "fiducial": 0.0,
         "kind": "gaussian",
@@ -229,7 +229,7 @@
       "value": 7.5e-05
     },
     "deltam31_ih": {
-      "fixed": true,
+      "fixed": false,
       "prior": {
         "kind": "uniform"
       },
@@ -241,7 +241,7 @@
       "value": -0.00237
     },
     "deltam31_nh": {
-      "fixed": true,
+      "fixed": false,
       "prior": {
         "kind": "uniform"
       },
@@ -275,7 +275,7 @@
       "value": "oscillations/PREM_12layer.dat"
     },
     "energy_scale": {
-      "fixed": true,
+      "fixed": false,
       "prior": {
         "fiducial": 1.0,
         "kind": "gaussian",
@@ -294,10 +294,10 @@
     },
     "livetime": {
       "fixed": true,
-      "value": 5.0
+      "value": 1.0
     },
     "nu_nubar_ratio": {
-      "fixed": true,
+      "fixed": false,
       "prior": {
         "fiducial": 1.0,
         "kind": "gaussian",
@@ -311,7 +311,7 @@
       "value": 1.0
     },
     "nue_numu_ratio": {
-      "fixed": true,
+      "fixed": false,
       "prior": {
         "fiducial": 1.0,
         "kind": "gaussian",
@@ -379,7 +379,7 @@
       "value": 0.5846852994181004
     },
     "theta13": {
-      "fixed": true,
+      "fixed": false,
       "prior": {
         "fiducial": 0.14835298641951802,
         "kind": "gaussian",
