@@ -15,7 +15,7 @@ from pisa.utils import utils
 
 PBS_TEMPLATE = '''#
 #PBS -l walltime={time:s}
-#PBS -l mem={mem}gb,vmem=16gb
+#PBS -l mem={mem:d}gb,vmem={vmem:d}gb
 #PBS -l nodes=1:ppn=1:gpus=1
 #PBS -l feature='gpgpu:intel14'
 #
@@ -23,33 +23,55 @@ PBS_TEMPLATE = '''#
 #PBS -j oe
 #PBS -o {logfile_path:s}
 
-cd $PBS_O_WORKDIR
-export PATH={pythonexec_path:s}:$PATH
-
 echo "========================================================================"
-echo "== PBS JOB commenced at: `date -u '+%Y-%m-%d %H:%M:%S'` (UTC)"
+echo "== PBS JOB COMMENCING AT: `date -u '+%Y-%m-%d %H:%M:%S'` (UTC)"
 echo "========================================================================"
 echo ""
 
-# Report user limits
+echo "PBS Header"
+echo "----------"
+echo "#PBS -l walltime={time:s}"
+echo "#PBS -l mem={mem:d}gb,vmem={vmem:d}gb"
+echo "#PBS -l nodes=1:ppn=1:gpus=1"
+echo "#PBS -l feature='gpgpu:intel14'"
+echo "#"
+echo "#PBS -m a"
+echo "#PBS -j oe"
+echo "#PBS -o {logfile_path:s}"
+echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+echo ""
+
+echo "set up environment"
+echo "------------------"
+if [ -n "$PBS_O_WORKDIR" ]
+then
+    echo "cd $PBS_O_WORKDIR"
+    cd $PBS_O_WORKDIR
+    echo ""
+fi
+
+echo "export PATH={pythonexec_path:s}:$PATH"
+export PATH={pythonexec_path:s}:$PATH
+echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+echo ""
+
 echo "ulimit -a"
 echo "---------"
 ulimit -a
-echo "------------------------------------------------------------------------"
-echo ""
-
-# Try to load CUDA
-echo "module load CUDA/6.0"
-echo "--------------------"
-module load CUDA/6.0
-echo "------------------------------------------------------------------------"
+echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 echo ""
 
 N_GPUS_PRESENT=$(nvidia-smi --list-gpus | wc -l || echo "0")
 if (( N_GPUS_PRESENT > 0 ))
 then
-    echo "nvidia-smi --list-gpus (+ aggregate ecc error info)"
-    echo "---------------------------------------------------"
+    echo "module load CUDA/6.0"
+    echo "--------------------"
+    module load CUDA/6.0
+    echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+    echo ""
+
+    echo "pre-command nvidia-smi --list-gpus (+ aggregate ecc error info)"
+    echo "---------------------------------------------------------------"
     for ((i=0; i<N_GPUS_PRESENT; i++))
     do
     	nvidia-smi --list-gpus | grep "GPU $i:"
@@ -58,26 +80,26 @@ then
     	nvidia-smi -i $i -q | grep -A 30 -i "ecc errors" | grep -A 14 -i "aggregate"
     done
     nvidia-smi --list-gpus
-    echo "------------------------------------------------------------------------"
+    echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
     echo ""
 fi
 
 echo "lscpu"
 echo "-----"
 lscpu
-echo "------------------------------------------------------------------------"
+echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 echo ""
 
 echo "env | grep PBS"
 echo "---------------"
 env | grep PBS
-echo "------------------------------------------------------------------------"
+echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 echo ""
 
 echo "cat \$PBS_NODEFILE"
 echo "-----------------"
 [ -f "$PBS_NODEFILE" ] && cat $PBS_NODEFILE || echo "<no PBS_NODEFILE>"
-echo "------------------------------------------------------------------------"
+echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 echo ""
 
 if (( N_GPUS_PRESENT > 0 ))
@@ -85,15 +107,49 @@ then
     echo "cat \$PBS_GPUFILE"
     echo "-----------------"
     [ -f "$PBS_GPUFILE" ] && cat $PBS_GPUFILE || echo "<no PBS_GPUFILE>"
-    echo "------------------------------------------------------------------------"
+    echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
     echo ""
 fi
 
-{command:s}
+echo "echo the command to be run"
+echo "--------------------------"
+echo 'time {command:s}'
+echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+echo ""
+
+echo "running command..."
+echo "------------------"
+time {command:s}
+echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+echo ""
+
+N_GPUS_PRESENT=$(nvidia-smi --list-gpus | wc -l || echo "0")
+if (( N_GPUS_PRESENT > 0 ))
+then
+    echo "post-command nvidia-smi --list-gpus (+ aggregate ecc error info)"
+    echo "----------------------------------------------------------------"
+    for ((i=0; i<N_GPUS_PRESENT; i++))
+    do
+    	nvidia-smi --list-gpus | grep "GPU $i:"
+    	nvidia-smi -i $i -q | grep -A 2 -i "ecc mode"
+    	nvidia-smi -i $i -q | grep -i "ecc errors"
+    	nvidia-smi -i $i -q | grep -A 30 -i "ecc errors" | grep -A 14 -i "aggregate"
+    done
+    echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+    echo ""
+fi
 
 echo "========================================================================"
-echo "== PBS JOB completed at: `date -u '+%Y-%m-%d %H:%M:%S'` (UTC)"
+echo "== PBS JOB COMPLETED AT: `date -u '+%Y-%m-%d %H:%M:%S'` (UTC)"
 echo "========================================================================"
+echo ""
+
+if [ -n "$PBS_JOBID" ]
+then
+    echo "qstat -f $PBS_JOBID"
+    echo "-------------------"
+    qstat -f $PBS_JOBID
+fi
 '''
 
 
@@ -144,7 +200,12 @@ if __name__ == "__main__":
         '--mem',
         type=int,
         default=16,
-        help='Amount of memory to request, in GB.')
+        help='Amount of physical memory to request, in GB.')
+    parser.add_argument(
+        '--vmem',
+        type=int,
+        default=16,
+        help='Amount of virtual to request, in GB.')
     parser.add_argument(
         '--basedir',
         type=str,
@@ -243,6 +304,8 @@ respectively.'''
         with open(args.jobfile_path, 'w') as jobfile:
             jobfile.write(pbs_text)
 
+    print '\n\n'
     print 'Command: %s' % command
+    print '\n'
     print 'Finished creating %d PBS job files in directory %s' % \
             (args.numjobs, args.jobdir)
