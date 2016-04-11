@@ -30,7 +30,7 @@ class PIDServiceMC(PIDServiceBase):
                  pid_remove_true_downgoing, pid_spec=None,
                  pid_spec_source=None, compute_error=False,
                  replace_invalid=False, **kwargs):
-        super(PIDServiceBase, self).__init__(ebins, czbins)
+        super(PIDServiceMC, self).__init__(ebins, czbins)
 
         self.events_source = None
         self.events = None

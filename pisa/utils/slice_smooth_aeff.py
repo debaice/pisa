@@ -240,21 +240,43 @@ def plot_slice_smooth(smooth_store, metadata=None, save_basename=None):
     )
     aeff_fine = aeff_slice_service.get_aeff()
 
+    aeff_slice_service = Aeff.aeff_service_factory(
+        aeff_mode='slice_smooth', ebins=ebins, czbins=czbins,
+        aeff_slice_smooth=smooth_store
+    )
+    aeff_reg = aeff_slice_service.get_aeff()
+
     for group in ungrouped + grouped:
+        rep_flavint = group.flavints()[0]
+
         branch = smooth_store[repr(group)]
         hist = branch['hist']
         hist_err = branch['hist_err']
         smooth_cz_slices = branch['smooth_cz_slices']
-        smooth = branch['smooth']
 
-        rep_flavint = group.flavints()[0]
+        smooth = aeff_reg[rep_flavint]
+        #smooth = branch['smooth']
+        assert np.min(smooth) >= 0, '%s: min=%s' % (group, np.min(smooth))
+
         fine = aeff_fine[rep_flavint]
+        assert np.min(fine) >= 0, '%s: min=%s' % (group, np.min(fine))
 
         log_h = np.ma.masked_invalid(np.log10(hist))
         log_scz = np.ma.masked_invalid(np.log10(smooth_cz_slices))
         log_s = np.ma.masked_invalid(np.log10(smooth))
         log_fine = np.ma.masked_invalid(np.log10(fine))
         fract_err = np.ma.masked_invalid((smooth-hist)/hist)
+
+        # Report RMS fractional errors for upgoing-only and full-sky
+        rms_fracterr_fullsky = np.sqrt(np.mean(fract_err**2))
+        logging.info('%s: RMS of fractional error full map = %s' %
+                     (group, rms_fracterr_fullsky))
+        up_only_cz_idx = czbins <= 0
+        if sum(up_only_cz_idx) < len(czbins):
+            upfe = fract_err[:, up_only_cz_idx]
+            rms_fracterr_uponly = np.sqrt(np.mean(upfe**2))
+            logging.info('%s: RMS of fractional error upgoing only = %s' %
+                         (group, rms_fracterr_uponly))
 
         # Derive vmin and vmax from the histogram (separately for each group)
         vmin = np.inf

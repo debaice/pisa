@@ -65,7 +65,8 @@ parser.add_argument(
 )
 parser.add_argument(
     '--emax', metavar='EMAX_GeV', type=float, default=90,
-    help='Energy bins\' righ-most edge, in GeV'
+    help='''Energy bins\' righ-most edge, in GeV (note this is reco energy, so
+    can be higher than highest simulated energy)'''
 )
 parser.add_argument(
     '--n-ebins', type=int, default=300,
@@ -141,8 +142,8 @@ czbin_midpoints = (czbins[:-1] + czbins[1:])/2.0
 # Bin the PID after removing true-downgoing events, and collapsing the
 # reco-coszen dependence by using a single czbin
 single_czbin = [-1, 0]
-pidmc = PIDServiceMC(ebins=ebins, czbins=single_czbin, events=events,
-                     pid_ver=args.pid_ver, remove_true_downgoing=True,
+pidmc = PIDServiceMC(ebins=ebins, czbins=single_czbin, pid_events=events,
+                     pid_ver=args.pid_ver, pid_remove_true_downgoing=True,
                      compute_error=True, replace_invalid=True)
 
 # Check dependent_sig arg
@@ -163,8 +164,8 @@ if make_plots:
     fig, axgrp = plt.subplots(2, 2, sharex=True, num=1, figsize=FIGSIZE)
     axgrp = axgrp.flatten()
     basetitle = (
-        'Fraction of events ID\'d, %s geometry %s, MC runs %s with V'
-        '%s processing & and PID version %s' %
+        'Fraction of events ID\'d, %s geometry %s, MC runs %s with '
+        '%s processing and PID version %s' %
         (events.metadata['detector'].upper(), events.metadata['geom'].upper(),
          utils.list2hrlist(events.metadata['runs']),
          events.metadata['proc_ver'], args.pid_ver)
@@ -173,11 +174,11 @@ if make_plots:
 
 rel_errors = pidmc.get_rel_error()
 
-param_pid_maps = {'binning': {'ebins':ebins, 'czbins':czbins}}
+param_pid_kernels = {'binning': {'ebins':ebins, 'czbins':czbins}}
 histdata = {}
 smooth_energy_dep = {}
 esmooth_store = {'ebin_midpoints': ebin_midpoints}
-for label, label_data in pidmc.pid_maps.iteritems():
+for label, label_data in pidmc.pid_kernels.iteritems():
     if label == 'binning':
         continue
     pid_fract_totals = np.zeros(n_ebins)
@@ -311,6 +312,7 @@ outfname = (
 )
 outfpath = os.path.join(outdir, outfname)
 logging.info('Saving PID energy dependence info to file "%s"' % outfpath)
+utils.mkdir(outdir)
 jsons.to_json(esmooth_store, outfpath)
 
 
@@ -330,8 +332,8 @@ if make_plots:
 # COSZEN
 #===============================================================================
 single_ebin = [1, 80]
-pidmc = PIDServiceMC(ebins=single_ebin, czbins=czbins, events=events,
-                     pid_ver=args.pid_ver, remove_true_downgoing=False,
+pidmc = PIDServiceMC(ebins=single_ebin, czbins=czbins, pid_events=events,
+                     pid_ver=args.pid_ver, pid_remove_true_downgoing=False,
                      compute_error=True, replace_invalid=True)
 
 if make_plots:
@@ -340,7 +342,7 @@ if make_plots:
     fig, axgrp = plt.subplots(2, 2, sharex=True, num=2, figsize=FIGSIZE)
     axgrp = axgrp.flatten()
     basetitle = (
-        'Fraction of events ID\'d, %s geometry %s, MC runs %s with V'
+        'Fraction of events ID\'d, %s geometry %s, MC runs %s with '
         '%s processing & and PID version %s' %
         (events.metadata['detector'].upper(), events.metadata['geom'].upper(),
          utils.list2hrlist(events.metadata['runs']),
@@ -350,11 +352,11 @@ if make_plots:
 
 rel_errors = pidmc.get_rel_error()
 
-param_pid_maps = {'binning': {'ebins':ebins, 'czbins':czbins}}
+param_pid_kernels = {'binning': {'ebins':ebins, 'czbins':czbins}}
 histdata = {}
 smooth_coszen_dep = {}
 czdep_store = {'czbin_midpoints': czbin_midpoints}
-for label, label_data in pidmc.pid_maps.iteritems():
+for label, label_data in pidmc.pid_kernels.iteritems():
     if label == 'binning':
         continue
     pid_fract_totals = np.zeros(n_czbins)

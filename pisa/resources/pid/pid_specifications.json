@@ -38,6 +38,19 @@
           }
         }
       }
+    },
+	"V40": {
+      "V5.1": {
+        "1": {
+          "field_map": {
+            "pid": "PINGU_PID_Score/PID_PINGU_V40_HE_E2wgt_MLPBNN.weights.xml"
+          },
+          "criteria": {
+            "cscd": "pid <= 0.55",
+            "trck": "pid > 0.55"
+          }
+        }
+      }
     }
   }
 }
