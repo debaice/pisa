@@ -12,7 +12,9 @@ primary difference is that it only uses the one fiducial model template of the
 maximizing the LLH / or minimizing the chisquare using the optimizer.
 """
 
+
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
+
 
 parser = ArgumentParser(
     description='''Run the Asimov optimizer-based analysis varying the
@@ -36,10 +38,8 @@ parser.add_argument(
     help='Name of metric to use.'
 )
 parser.add_argument(
-    '--check-octant', action='store_true',
-    help='''After first optimisation, check whether seeding with theta23
-    mirrored into the alternative octant leads to a better solution (requires
-    2x the amount of time).'''
+    '--single-octant', action='store_true',
+    help='Do NOT check theta23 in other octant after first optimisation.'
 )
 parser.add_argument(
     '--pseudo-data-settings',
@@ -63,12 +63,6 @@ args = parser.parse_args()
 
 import numpy as np
 import scipy
-# Workaround for old scipy versions
-if scipy.__version__ < '0.12.0':
-    logging.warn('Detected scipy version %s < 0.12.0' %scipy.__version__)
-    if 'maxiter' in minimizer_settings:
-        logging.warn('Optimizer settings for "maxiter" will be ignored')
-        minimizer_settings.pop('maxiter')
 
 from pisa.utils.log import logging, tprofile, physics, set_verbosity
 from pisa.utils.jsons import from_json, to_json
@@ -83,10 +77,16 @@ set_verbosity(args.verbose)
 # Read in the settings
 template_settings = from_json(args.template_settings)
 minimizer_settings = from_json(args.minimizer_settings)
+pseudo_data_settings = None
 if args.pseudo_data_settings is not None:
     pseudo_data_settings = from_json(args.pseudo_data_settings)
-else:
-    pseudo_data_settings = template_settings
+
+# Workaround for old scipy versions
+if scipy.__version__ < '0.12.0':
+    logging.warn('Detected scipy version %s < 0.12.0' %scipy.__version__)
+    if 'maxiter' in minimizer_settings:
+        logging.warn('Optimizer settings for "maxiter" will be ignored')
+        minimizer_settings.pop('maxiter')
 
 # Make sure that both pseudo data and template are using the same
 # channel. Raise Exception and quit otherwise
@@ -134,7 +134,7 @@ for data_tag, data_normal in [('data_NMH', True), ('data_IMH', False)]:
                                   template_settings['params'],
                                   minimizer_settings, args.save_steps,
                                   normal_hierarchy=hypo_normal,
-                                  check_octant=args.check_octant,
+                                  check_octant=not args.single_octant,
                                   metric_name=args.metric)
 
         tprofile.info('stop optimizer')
@@ -154,14 +154,14 @@ if args.pseudo_data_settings is not None:
 to_json(output, args.outfile)
 
 # Finally, report on what we have
-if not args.chisquare:
+if args.metric == 'llh':
     llr_nmh = -(np.min(results['data_NMH']['hypo_IMH'][args.metric])
                 - np.min(results['data_NMH']['hypo_NMH'][args.metric]))
     llr_imh = -(np.min(results['data_IMH']['hypo_IMH'][args.metric])
                 - np.min(results['data_IMH']['hypo_NMH'][args.metric]))
     logging.info('(hypo NMH is numerator): llr_nmh: %.4f, llr_imh: %.4f'
                  %(llr_nmh, llr_imh))
-else:
+elif args.metric == 'chisquare':
     chi2_nmh = np.min(results['data_NMH']['hypo_IMH'][args.metric])
     chi2_imh = np.min(results['data_IMH']['hypo_NMH'][args.metric])
     logging.info('chi2_nmh: %.4f, chi2_imh: %.4f' %(chi2_nmh, chi2_imh))
