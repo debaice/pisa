@@ -200,7 +200,6 @@ if __name__ == "__main__":
 
     parser.add_argument(
         '--metric', choices=['chisquare', 'llh'],
-        required=True,
         help='[Asimov only] Name of metric to use.'
     )
     parser.add_argument(
@@ -266,7 +265,7 @@ respectively.'''
             '$PISA/pisa/analysis/llr/LLROptimizerAnalysis.py'
         )
         command_template = LLR_COMMAND_TEMPLATE
-        assert not hasattr(args, 'metric'), \
+        assert args.metric is None, \
                 '"--metric" option not supported for LLR analysis.'
         assert args.pseudo_data_settings is None, \
                 '"--pseudo-data-settings" option not supported for LLR analysis.'
