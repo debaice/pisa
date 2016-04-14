@@ -161,7 +161,7 @@ command_template = (
     '{analysis_script:s}'
     ' --template-settings="{template_settings:s}"'
     ' --minimizer-settings="{minimizer_settings:s}"'
-    ' --ntrials={numtrials_per_job:s}'
+    ' --ntrials={numtrials_per_job:d}'
     ' --outfile="{outfile_path:s}"'
     ' {flags:s}'
 )
@@ -201,7 +201,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         '--numtrials-per-job',
-        type=str, required=True,
+        type=int, required=True,
         help='Number of LLR trials per job.'
     )
     parser.add_argument(

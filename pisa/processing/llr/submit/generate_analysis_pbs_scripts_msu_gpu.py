@@ -74,10 +74,10 @@ then
     echo "---------------------------------------------------------------"
     for ((i=0; i<N_GPUS_PRESENT; i++))
     do
-    	nvidia-smi --list-gpus | grep "GPU $i:"
-    	nvidia-smi -i $i -q | grep -A 2 -i "ecc mode"
-    	nvidia-smi -i $i -q | grep -i "ecc errors"
-    	nvidia-smi -i $i -q | grep -A 30 -i "ecc errors" | grep -A 14 -i "aggregate"
+        nvidia-smi --list-gpus | grep "GPU $i:"
+        nvidia-smi -i $i -q | grep -A 2 -i "ecc mode"
+        nvidia-smi -i $i -q | grep -i "ecc errors"
+        nvidia-smi -i $i -q | grep -A 30 -i "ecc errors" | grep -A 14 -i "aggregate"
     done
     nvidia-smi --list-gpus
     echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
@@ -130,10 +130,10 @@ then
     echo "----------------------------------------------------------------"
     for ((i=0; i<N_GPUS_PRESENT; i++))
     do
-    	nvidia-smi --list-gpus | grep "GPU $i:"
-    	nvidia-smi -i $i -q | grep -A 2 -i "ecc mode"
-    	nvidia-smi -i $i -q | grep -i "ecc errors"
-    	nvidia-smi -i $i -q | grep -A 30 -i "ecc errors" | grep -A 14 -i "aggregate"
+        nvidia-smi --list-gpus | grep "GPU $i:"
+        nvidia-smi -i $i -q | grep -A 2 -i "ecc mode"
+        nvidia-smi -i $i -q | grep -i "ecc errors"
+        nvidia-smi -i $i -q | grep -A 30 -i "ecc errors" | grep -A 14 -i "aggregate"
     done
     echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
     echo ""
@@ -152,44 +152,77 @@ then
 fi
 '''
 
+LLR_COMMAND_TEMPLATE = (
+    '{analysis_script:s}'
+    ' --template-settings="{template_settings:s}"'
+    ' --minimizer-settings="{minimizer_settings:s}"'
+    ' --ntrials={numtrials_per_job:d}'
+    ' --outfile="{outfile_path:s}"'
+    ' {flags:s}'
+)
+
+ASIMOV_COMMAND_TEMPLATE = (
+    '{analysis_script:s}'
+    ' --template-settings="{template_settings:s}"'
+    ' --minimizer-settings="{minimizer_settings:s}"'
+    ' --pseudo-data-settings="{pseudo_data_settings:s}"'
+    ' --metric {metric:s}'
+    ' --outfile="{outfile_path:s}"'
+    ' {flags:s}'
+)
+
 
 if __name__ == "__main__":
     job_generation_timestamp = utils.timestamp(utc=True, tz=False, winsafe=True)
 
     parser = ArgumentParser(
-        'Generate PBS job files; submit with e.g. qsub_wrapper_simple.sh.',
+        'Generate PBS job files for an analysis; submit with e.g. qsub_wrapper.sh.',
         #formatter_class=ArgumentDefaultsHelpFormatter
     )
     parser.add_argument(
+        '--analysis', choices=['llr', 'asimov'],
+        help='Analysis to be performed.'
+    )
+    parser.add_argument(
         '--template-settings',
-        type=str,
+        required=True,
         help='Settings file to use for template making.'
     )
     parser.add_argument(
         '--minimizer-settings',
-        type=str, required=True,
+        required=True,
         help='minimizer settings file.'
     )
     parser.add_argument(
-        '--no-alt-fit',
-        action='store_true',
-        help='No alt hierarchy fit.'
-    )
-    parser.add_argument(
-        '--single-octant',
-        action='store_true',
+        '--single-octant', action='store_true',
         help='single octant in llh only.'
     )
+
     parser.add_argument(
-        '--numjobs',
-        type=int, required=True,
-        help='Number of job files to generate.'
+        '--metric', choices=['chisquare', 'llh'],
+        required=True,
+        help='[Asimov only] Name of metric to use.'
     )
     parser.add_argument(
-        '--numtrials-per-job',
-        type=str, required=True,
-        help='Number of LLR trials per job.'
+        '--pseudo-data-settings',
+        metavar='JSONFILE', default=None,
+        help='[Asimov only] Settings for pseudo data templates, if desired to'
+             ' be different from template_settings.'
     )
+
+    parser.add_argument(
+        '--no-alt-fit', action='store_true',
+        help='[LLR only] No alt hierarchy fit.'
+    )
+    parser.add_argument(
+        '--numjobs', type=int, default=1,
+        help='[LLR only] Number of job files to generate.'
+    )
+    parser.add_argument(
+        '--numtrials-per-job', type=int, default=1,
+        help='[LLR only] Number of LLR trials per job.'
+    )
+
     parser.add_argument(
         '--time',
         type=str,
@@ -199,12 +232,12 @@ if __name__ == "__main__":
     parser.add_argument(
         '--mem',
         type=int,
-        default=16,
+        default=4,
         help='Amount of physical memory to request, in GB.')
     parser.add_argument(
         '--vmem',
         type=int,
-        default=16,
+        default=4,
         help='Amount of virtual to request, in GB.')
     parser.add_argument(
         '--basedir',
@@ -213,34 +246,46 @@ if __name__ == "__main__":
 Job files are placed in
     <basedir>/jobfiles
 Results (json files) are placed in
-    <basedir>/llr__<ts basename>__<ms base>/results_rawfiles
+    <basedir>/<analysis>__<ts basename>__<ms base>/results_rawfiles
 Logfiles (*.err, *.out, and PBS *.log -- some or all of which may be
 combined) are placed in
-    <basedir>/llr__<ts basename>__<ms base>/logfiles
+    <basedir>/<analysis>__<ts basename>__<ms base>/logfiles
 Note that <ts basename>  and <ms basename> are the template and
 minimizer settings files' basenames (i.e., without extensions),
 respectively.'''
     )
-    #parser.add_argument(
-    #    '--jobdir',
-    #    type=str,
-    #    help='Directory for generated job files.'
-    #)
-    #parser.add_argument(
-    #    '--outdir',
-    #    type=str, required=True,
-    #    help='Directory for llr result files.'
-    #)
-    #parser.add_argument(
-    #    '--logdir',
-    #    type=str, required=True,
-    #    help='Directory to store PBS, stdout, and stderr log files'
-    #)
+    parser.add_argument(
+        '-v', '--verbose', action='count', default=None,
+        help='Set verbosity level.'
+    )
     args = parser.parse_args()
 
-    args.analysis_script = utils.expandPath(
-        '$PISA/pisa/analysis/llr/LLROptimizerAnalysis.py'
-    )
+    args.analysis = args.analysis.strip().lower()
+    if args.analysis == 'llr':
+        args.analysis_script = utils.expandPath(
+            '$PISA/pisa/analysis/llr/LLROptimizerAnalysis.py'
+        )
+        command_template = LLR_COMMAND_TEMPLATE
+        assert not hasattr(args, 'metric'), \
+                '"--metric" option not supported for LLR analysis.'
+        assert args.pseudo_data_settings is None, \
+                '"--pseudo-data-settings" option not supported for LLR analysis.'
+    if args.analysis == 'asimov':
+        args.analysis_script = utils.expandPath(
+            '$PISA/pisa/analysis/asimov/AsimovOptimizerAnalysis.py'
+        )
+        command_template = ASIMOV_COMMAND_TEMPLATE
+        assert args.no_alt_fit == False, \
+                '"--no-alt-fit" flag not supported for Asimov analysis.'
+        assert args.numjobs == 1, \
+                'numjobs = %d invalid for Asimov analysis (only one outcome possible).' \
+                %args.numjobs
+        assert args.numtrials_per_job == 1, \
+                'numtrials-per-job = %d invalid for Asimov analysis' \
+                ' (only one outcome possible).' %args.numtrials_per_job
+
+    if args.pseudo_data_settings is None:
+        args.pseudo_data_settings = args.template_settings
 
     flags = ' --save-steps'
     if args.single_octant:
@@ -251,16 +296,20 @@ respectively.'''
 
     args.pythonexec_path = os.path.dirname(sys.executable)
 
-    analysis = 'llr'
-
     # Formulate file names from template and minimizer settings file names,
     # timestamp now, (and later, the file number in this sequence)
     ts_base, _ = os.path.splitext(os.path.basename(args.template_settings))
     ms_base, _ = os.path.splitext(os.path.basename(args.minimizer_settings))
-    an_ts_ms_basename = '%s__%s__%s' % (analysis, ts_base, ms_base)
+    pd_base, _ = os.path.splitext(os.path.basename(args.pseudo_data_settings))
+
+    if pd_base == ts_base:
+        an_ts_ms_basename = '%s__%s__%s' %(args.analysis, ts_base, ms_base)
+    else:
+        an_ts_ms_basename = '%s__%s__%s__%s' %(args.analysis, ts_base,
+                                               pd_base, ms_base)
 
     subdir = an_ts_ms_basename
-    batch_basename = '%s__%s' % (an_ts_ms_basename, job_generation_timestamp)
+    batch_basename = '%s__%s' %(an_ts_ms_basename, job_generation_timestamp)
 
     args.jobdir = utils.expandPath(
         os.path.join(args.basedir, 'jobfiles'), absolute=False
@@ -280,32 +329,30 @@ respectively.'''
     # Expand any variables in template/minimizer settings resource specs passed
     # in by user (do *not* make absoulte, since resource specs in PISA allow
     # for implicit referencing from the $PISA/pisa/resources dir)
-    args.template_settings = utils.expandPath(args.template_settings, absolute=False)
-    args.minimizer_settings = utils.expandPath(args.minimizer_settings, absolute=False)
+    args.template_settings = utils.expandPath(args.template_settings,
+                                              absolute=False)
+    args.minimizer_settings = utils.expandPath(args.minimizer_settings,
+                                               absolute=False)
+    args.pseudo_data_settings = utils.expandPath(args.pseudo_data_settings,
+                                                 absolute=False)
 
     for file_num in xrange(args.numjobs):
-        job_basename = '%s__%06d' % (batch_basename, file_num)
+        job_basename = '%s__%06d' %(batch_basename, file_num)
 
         args.jobfile_path = os.path.join(args.jobdir, job_basename + '.pbs')
         args.logfile_path = os.path.join(args.logdir, job_basename + '.log')
         args.outfile_path = os.path.join(args.outdir, job_basename + '.json')
 
-        command = ('{analysis_script:s} '
-                   '--template-settings="{template_settings:s}" '
-                   '--minimizer-settings="{minimizer_settings:s}" '
-                   '--ntrials={numtrials_per_job:s} '
-                   '--outfile="{outfile_path:s}" '
-                   '{flags:s}'.format(**vars(args)))
-        args.command = command
+        args.command = command_template.format(**vars(args))
 
         pbs_text = PBS_TEMPLATE.format(**vars(args))
 
-        print 'Writing %d bytes to "%s"' % (len(pbs_text), args.jobfile_path)
+        print 'Writing %d bytes to "%s"' %(len(pbs_text), args.jobfile_path)
         with open(args.jobfile_path, 'w') as jobfile:
             jobfile.write(pbs_text)
 
     print '\n\n'
-    print 'Command: %s' % command
+    print 'Command: %s' %args.command
     print '\n'
-    print 'Finished creating %d PBS job files in directory %s' % \
-            (args.numjobs, args.jobdir)
+    print 'Finished creating %d PBS job files in directory %s' \
+            %(args.numjobs, args.jobdir)
