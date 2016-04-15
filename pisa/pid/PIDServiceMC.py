@@ -131,7 +131,8 @@ class PIDServiceMC(PIDServiceBase):
                 detector=self.events.metadata['detector'],
                 geom=self.events.metadata['geom'],
                 proc_ver=self.events.metadata['proc_ver'],
-                pid_specs=self.pid_spec_source
+                pid_specs=self.pid_spec_source,
+                pid_spec_ver=pid_ver
             )
         self.signatures = self.pid_spec.get_signatures()
 

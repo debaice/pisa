@@ -302,7 +302,7 @@ for label, label_data in pidmc.pid_kernels.iteritems():
 
 # Derive output filename
 outfname = (
-    'pid_energy_dependence__%s_%s__runs_%s__proc_%s__pid_%s.json' % (
+    'pid_energy_smooth__%s_%s__runs_%s__proc_%s__pid_%s.json' % (
         events.metadata['detector'],
         events.metadata['geom'],
         utils.list2hrlist(events.metadata['runs']),
@@ -311,7 +311,7 @@ outfname = (
     )
 )
 outfpath = os.path.join(outdir, outfname)
-logging.info('Saving PID energy dependence info to file "%s"' % outfpath)
+logging.info('Saving PID energy smooth info to file "%s"' % outfpath)
 utils.mkdir(outdir)
 jsons.to_json(esmooth_store, outfpath)
 
@@ -319,7 +319,7 @@ jsons.to_json(esmooth_store, outfpath)
 if make_plots:
     fig.tight_layout(rect=(0,0,1,0.96))
     basefname = (
-        'pid_energy_dependence__%s_%s__runs_%s__proc_%s__pid_%s'
+        'pid_energy_smooth__%s_%s__runs_%s__proc_%s__pid_%s'
         % (events.metadata['detector'], events.metadata['geom'],
            utils.list2hrlist(events.metadata['runs']),
            events.metadata['proc_ver'], args.pid_ver)
