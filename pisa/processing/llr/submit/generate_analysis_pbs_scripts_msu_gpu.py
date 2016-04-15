@@ -79,7 +79,6 @@ then
         nvidia-smi -i $i -q | grep -i "ecc errors"
         nvidia-smi -i $i -q | grep -A 30 -i "ecc errors" | grep -A 14 -i "aggregate"
     done
-    nvidia-smi --list-gpus
     echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
     echo ""
 fi
@@ -142,10 +141,10 @@ fi
 echo "========================================================================"
 echo "== PBS JOB COMPLETED AT: `date -u '+%Y-%m-%d %H:%M:%S'` (UTC)"
 echo "========================================================================"
-echo ""
 
 if [ -n "$PBS_JOBID" ]
 then
+    echo ""
     echo "qstat -f $PBS_JOBID"
     echo "-------------------"
     qstat -f $PBS_JOBID
@@ -288,7 +287,7 @@ respectively.'''
 
     flags = ' --save-steps'
     if args.single_octant:
-        flags += ' --single_octant'
+        flags += ' --single-octant'
     if args.no_alt_fit:
         flags += ' --no-alt-fit'
     args.flags = flags
