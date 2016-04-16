@@ -79,7 +79,6 @@ then
         nvidia-smi -i $i -q | grep -i "ecc errors"
         nvidia-smi -i $i -q | grep -A 30 -i "ecc errors" | grep -A 14 -i "aggregate"
     done
-    nvidia-smi --list-gpus
     echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
     echo ""
 fi
@@ -142,10 +141,10 @@ fi
 echo "========================================================================"
 echo "== PBS JOB COMPLETED AT: `date -u '+%Y-%m-%d %H:%M:%S'` (UTC)"
 echo "========================================================================"
-echo ""
 
 if [ -n "$PBS_JOBID" ]
 then
+    echo ""
     echo "qstat -f $PBS_JOBID"
     echo "-------------------"
     qstat -f $PBS_JOBID
@@ -200,7 +199,6 @@ if __name__ == "__main__":
 
     parser.add_argument(
         '--metric', choices=['chisquare', 'llh'],
-        required=True,
         help='[Asimov only] Name of metric to use.'
     )
     parser.add_argument(
@@ -266,7 +264,7 @@ respectively.'''
             '$PISA/pisa/analysis/llr/LLROptimizerAnalysis.py'
         )
         command_template = LLR_COMMAND_TEMPLATE
-        assert not hasattr(args, 'metric'), \
+        assert args.metric is None, \
                 '"--metric" option not supported for LLR analysis.'
         assert args.pseudo_data_settings is None, \
                 '"--pseudo-data-settings" option not supported for LLR analysis.'
@@ -289,7 +287,7 @@ respectively.'''
 
     flags = ' --save-steps'
     if args.single_octant:
-        flags += ' --single_octant'
+        flags += ' --single-octant'
     if args.no_alt_fit:
         flags += ' --no-alt-fit'
     args.flags = flags
