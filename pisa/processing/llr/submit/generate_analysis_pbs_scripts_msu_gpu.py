@@ -11,7 +11,7 @@ import sys
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 
 from pisa.utils import utils
-
+import genericUtils as GUTIL
 
 PBS_TEMPLATE = '''#
 #PBS -l walltime={time:s}
@@ -164,10 +164,11 @@ ASIMOV_COMMAND_TEMPLATE = (
     '{analysis_script:s}'
     ' --template-settings="{template_settings:s}"'
     ' --minimizer-settings="{minimizer_settings:s}"'
-    ' --pseudo-data-settings="{pseudo_data_settings:s}"'
+    ' --asimov-data-settings="{asimov_data_settings:s}"'
     ' --metric {metric:s}'
     ' --outfile="{outfile_path:s}"'
     ' {flags:s}'
+    ' {sweepspec:s}'
 )
 
 
@@ -202,10 +203,14 @@ if __name__ == "__main__":
         help='[Asimov only] Name of metric to use.'
     )
     parser.add_argument(
-        '--pseudo-data-settings',
+        '--asimov-data-settings',
         metavar='JSONFILE', default=None,
-        help='[Asimov only] Settings for pseudo data templates, if desired to'
+        help='[Asimov only] Settings for Asimov data, if desired to'
              ' be different from template_settings.'
+    )
+    parser.add_argument(
+        '--sweep-t23', default=None,
+        help='[Asimov only] Sweep over these injected theta23 values.'
     )
 
     parser.add_argument(
@@ -266,8 +271,9 @@ respectively.'''
         command_template = LLR_COMMAND_TEMPLATE
         assert args.metric is None, \
                 '"--metric" option not supported for LLR analysis.'
-        assert args.pseudo_data_settings is None, \
-                '"--pseudo-data-settings" option not supported for LLR analysis.'
+        assert args.asimov_data_settings is None, \
+                '"--asimov-data-settings" option not supported for LLR analysis.'
+        assert args.sweep_t23 is None
     if args.analysis == 'asimov':
         args.analysis_script = utils.expandPath(
             '$PISA/pisa/analysis/asimov/AsimovOptimizerAnalysis.py'
@@ -281,9 +287,14 @@ respectively.'''
         assert args.numtrials_per_job == 1, \
                 'numtrials-per-job = %d invalid for Asimov analysis' \
                 ' (only one outcome possible).' %args.numtrials_per_job
+        if args.sweep_t23 is not None:
+            args.sweep_t23 = GUTIL.hrlist2list(args.sweep_t23)
 
-    if args.pseudo_data_settings is None:
-        args.pseudo_data_settings = args.template_settings
+    if args.sweep_t23 is None:
+        args.sweep_t23 = [None]
+
+    if args.asimov_data_settings is None:
+        args.asimov_data_settings = args.template_settings
 
     flags = ' --save-steps'
     if args.single_octant:
@@ -298,7 +309,7 @@ respectively.'''
     # timestamp now, (and later, the file number in this sequence)
     ts_base, _ = os.path.splitext(os.path.basename(args.template_settings))
     ms_base, _ = os.path.splitext(os.path.basename(args.minimizer_settings))
-    pd_base, _ = os.path.splitext(os.path.basename(args.pseudo_data_settings))
+    pd_base, _ = os.path.splitext(os.path.basename(args.asimov_data_settings))
 
     if pd_base == ts_base:
         an_ts_ms_basename = '%s__%s__%s' %(args.analysis, ts_base, ms_base)
@@ -307,7 +318,6 @@ respectively.'''
                                                pd_base, ms_base)
 
     subdir = an_ts_ms_basename
-    batch_basename = '%s__%s' %(an_ts_ms_basename, job_generation_timestamp)
 
     args.jobdir = utils.expandPath(
         os.path.join(args.basedir, 'jobfiles'), absolute=False
@@ -331,26 +341,44 @@ respectively.'''
                                               absolute=False)
     args.minimizer_settings = utils.expandPath(args.minimizer_settings,
                                                absolute=False)
-    args.pseudo_data_settings = utils.expandPath(args.pseudo_data_settings,
+    args.asimov_data_settings = utils.expandPath(args.asimov_data_settings,
                                                  absolute=False)
 
-    for file_num in xrange(args.numjobs):
-        job_basename = '%s__%06d' %(batch_basename, file_num)
+    count = 0
+    for t23 in args.sweep_t23:
+        for file_num in xrange(args.numjobs):
+            #batch_basename = '%s__%s' %(an_ts_ms_basename, job_generation_timestamp)
+            if args.analysis == 'llr':
+                filenum_str = '__' + '%06d' %file_num
+                timestamp = '__' + job_generation_timestamp
+            elif args.analysis == 'asimov':
+                filenum_str = ''
+                timestamp = ''
 
-        args.jobfile_path = os.path.join(args.jobdir, job_basename + '.pbs')
-        args.logfile_path = os.path.join(args.logdir, job_basename + '.log')
-        args.outfile_path = os.path.join(args.outdir, job_basename + '.json')
+            if t23 is None:
+                job_basename = '%s' %(an_ts_ms_basename) + timestamp + filnum_str
+                out_basename = job_basename
+                args.sweepspec = ''
+            else:
+                job_basename = '%s__t23_%s' %(an_ts_ms_basename, str(t23)) + timestamp + filenum_str
+                out_basename = '%s' %(an_ts_ms_basename) + timestamp + filenum_str
+                args.sweepspec = ' --sweep-t23 ' + str(t23)
 
-        args.command = command_template.format(**vars(args))
+            args.jobfile_path = os.path.join(args.jobdir, job_basename + '.pbs')
+            args.logfile_path = os.path.join(args.logdir, job_basename + '.log')
+            args.outfile_path = os.path.join(args.outdir, job_basename + '.json')
 
-        pbs_text = PBS_TEMPLATE.format(**vars(args))
+            args.command = command_template.format(**vars(args))
 
-        print 'Writing %d bytes to "%s"' %(len(pbs_text), args.jobfile_path)
-        with open(args.jobfile_path, 'w') as jobfile:
-            jobfile.write(pbs_text)
+            pbs_text = PBS_TEMPLATE.format(**vars(args))
+
+            print 'Writing %d bytes to "%s"' %(len(pbs_text), args.jobfile_path)
+            with open(args.jobfile_path, 'w') as jobfile:
+                jobfile.write(pbs_text)
+            count += 1
 
     print '\n\n'
     print 'Command: %s' %args.command
     print '\n'
     print 'Finished creating %d PBS job files in directory %s' \
-            %(args.numjobs, args.jobdir)
+            %(count, args.jobdir)

@@ -162,6 +162,9 @@ asimov_data_maker = TemplateMaker(
     **asimov_data_settings['binning']
 )
 
+# Now that a bit has been instantiated successfully, create the output dir if
+# it doesn't exist
+utils.mkdir(os.path.dirname(args.outfile))
 
 for livetime, t23, dm31 in itertools.product(args.sweep_livetime,
                                              args.sweep_t23,
