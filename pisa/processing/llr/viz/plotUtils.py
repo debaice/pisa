@@ -20,6 +20,8 @@ from pisa.utils.params import select_hierarchy, get_free_params, \
         get_prior_bounds, get_values
 from pisa.utils.utils import get_bin_centers
 
+import plotGoodies as PG
+import histogramTools as HT
 
 def get_param_label_string(param_name):
     param_label_dict = {
@@ -47,7 +49,7 @@ def validate_key(key):
 
 
 # Functions for gaussian fit:
-gauss = lambda x, amp, loc, width: amp*np.exp(-(x-loc)**2/(2.*width**2))
+gauss = lambda x, amp, mean, stddev: amp/(stddev*np.sqrt(2*np.pi))*np.exp(-(x-mean)**2/(2.*stddev**2))
 
 def do_gauss(xvals, yvals, **kwargs):
     f, c = curve_fit(gauss, xvals, yvals, **kwargs)
@@ -59,7 +61,7 @@ def plot_gauss(fit, **kwargs):
     plt.plot(xvals, gauss(xvals, *fit), **kwargs)
 
 
-def plot_llr_distribution(llr_cur, tkey, bins, color='b', **kwargs):
+def plot_llr_distribution(llr_cur, tkey, bins, color='b', ax=None, **kwargs):
     """Plots LLR distributions
 
     \Params:
@@ -70,16 +72,32 @@ def plot_llr_distribution(llr_cur, tkey, bins, color='b', **kwargs):
     """
 
     validate_key(tkey)
-    llr_cur.hist(
-        bins=bins, histtype='step', lw=2, color=color, **kwargs)
 
-    hist_vals, bincen = plot_error(llr_cur, bins, fmt='.'+color, lw=2)
+    hist_vals, bin_edges, err = HT.histogram_with_error(a=llr_cur.values, bins=bins)
+    ax, nom_lines, err_plt = HT.stepHist(bin_edges=bin_edges, y=hist_vals,
+                                         yerr=err, ax=ax)
+    #llr_cur.hist(
+    #    bins=bins, histtype='step', lw=2, color=color, **kwargs)
 
-    fit_gauss = plot_gauss_fit(llr_cur, hist_vals, bincen, color=color, lw=2)
-    logging.info("    mu = %.4f, sigma = %.4f" % (fit_gauss[1], fit_gauss[2]))
-    #print "median: ", llr_cur.median()
-    logging.info("    num_trials: %d", len(llr_cur))
-    return hist_vals, bincen, fit_gauss
+    #hist_vals, xbins = np.histogram(llr_cur, bins=bins)
+    bincen = get_bin_centers(bin_edges)
+    #plt.errorbar(bincen, hist_vals, yerr=np.sqrt(hist_vals),
+    #             lw=1, color=PG.hsvaFact(color, vf=0.6))
+
+    mean = np.mean(llr_cur)
+    stddev = np.std(llr_cur)
+    gx = np.linspace(mean-8*stddev, mean+8*stddev, 1000)
+    amp = len(llr_cur)*np.mean(np.diff(bin_edges))
+    gy = gauss(gx, amp, mean, stddev)
+    plt.plot(gx, gy,
+             ls='-', lw=2,
+             color=PG.hsvaFact(nom_lines.get_color(), vf=1.2, sf=1.8))
+
+    #fit_gauss = plot_gauss_fit(llr_cur, hist_vals, bincen, color=color, lw=2)
+    #logging.info("    mu = %.4f, sigma = %.4f" % (fit_gauss[1], fit_gauss[2]))
+    ##print "median: ", llr_cur.median()
+    #logging.info("    num_trials: %d", len(llr_cur))
+    return hist_vals, bincen, (amp, mean, stddev)
 
 
 def plot_posterior_params(frames, template_settings, false_h_inj=None,
@@ -184,7 +202,6 @@ def plot_error(llr, bins, **kwargs):
 
 def plot_gauss_fit(llr, hist_vals, bincen, **kwargs):
     """Plots gaussian fit over the llr distributions."""
-
     guess = [np.max(hist_vals), np.mean(llr), np.std(llr)]
     fit, cov = do_gauss(bincen, hist_vals, p0=guess)
     plot_gauss(fit, **kwargs)
@@ -227,18 +244,19 @@ def plot_fill(llr_cur, tkey, asimov_llr, hist_vals, bincen, fit_gauss,
     which represent an LLR distribution.
     """
     validate_key(tkey)
-
     expr = 'bincen < asimov_llr' if 'true_N' in tkey else 'bincen > asimov_llr'
 
-    plt.fill_betweenx(
-        hist_vals, bincen, x2=asimov_llr, where=eval(expr), **kwargs)
+    #plt.fill_betweenx(
+    #    hist_vals, bincen, x2=asimov_llr, where=eval(expr), **kwargs)
 
-    pval_count = (1.0 - float(np.sum(llr_cur > asimov_llr))/len(llr_cur)
-              if 'true_N' in tkey else
-              (1.0 - float(np.sum(llr_cur < asimov_llr))/len(llr_cur)))
+    if 'true_N' in tkey:
+        pval_count = 1.0 - float(np.sum(llr_cur > asimov_llr))/len(llr_cur)
+    else:
+        pval_count = 1.0 - float(np.sum(llr_cur < asimov_llr))/len(llr_cur)
+
     sigma_count = norm.isf(pval_count)
     sigma_count_2sided = norm.isf(pval_count/2.)
-    sigma_gauss = np.fabs(asimov_llr - fit_gauss[1])/fit_gauss[2]
+    sigma_gauss = np.abs(asimov_llr - fit_gauss[1])/fit_gauss[2]
     #logging.info(
     #    "  For tkey: %s, gaussian computed mean (of alt MH): %.3f and sigma: %.3f"
     #    % (tkey, fit_gauss[1], fit_gauss[2]))
@@ -409,9 +427,9 @@ def plot_column(tkey, hkey, subplot, column, template_settings, color,
             plot_bound(scale*prange, ymax, ax)
 
         if bool(re.match('^theta23', col_name)):
-            ax.set_xlim([prange[0], prange[1]])
+            ax.set_xlim([prange[0]-3, prange[1]+3])
         else:
-            ax.set_xlim([mean-5.0*std, mean+5.0*std])
+            ax.set_xlim([mean-6.0*std, mean+6.0*std])
         ax.set_ylim([ylim[0], ymax*1.2])
         scale_label = r' $\times\,%s$' % scale if scale != 1 else ''
         ax.set_xlabel(get_param_label_string(col_name)+scale_label)
