@@ -115,10 +115,12 @@ if args.sweep_livetime is None:
     args.sweep_livetime = [None]
 else:
     args.sweep_livetime = GUTIL.hrlist2list(args.sweep_livetime)
+
 if args.sweep_t23 is None:
     args.sweep_t23 = [None]
 else:
     args.sweep_t23 = GUTIL.hrlist2list(args.sweep_t23)
+
 if args.sweep_dm31 is None:
     args.sweep_dm31 = [None]
 else:
@@ -237,7 +239,7 @@ for livetime, t23, dm31 in itertools.product(args.sweep_livetime,
     # Write to file
     rootname, ext = os.path.splitext(args.outfile)
     if len(labels) > 0:
-        labels.insert(0, 'FIXED')
+        labels.insert(0, '__FIXED')
     outfname = rootname + '__'.join(labels) + ext
     to_json(output, outfname)
 
