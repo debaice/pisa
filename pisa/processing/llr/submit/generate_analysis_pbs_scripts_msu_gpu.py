@@ -8,9 +8,12 @@
 
 import os
 import sys
+from itertools import product
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 
 from pisa.utils import utils
+
+from smartFormat import fnameNumFmt
 import genericUtils as GUTIL
 
 PBS_TEMPLATE = '''#
@@ -208,9 +211,18 @@ if __name__ == "__main__":
         help='[Asimov only] Settings for Asimov data, if desired to'
              ' be different from template_settings.'
     )
+
+    parser.add_argument(
+        '--sweep-livetime', default=None,
+        help='[Asimov only] Sweep over these livetime values (years).'
+    )
     parser.add_argument(
         '--sweep-t23', default=None,
-        help='[Asimov only] Sweep over these injected theta23 values.'
+        help='[Asimov only] Sweep over these injected theta23 values (deg).'
+    )
+    parser.add_argument(
+        '--sweep-dm31', default=None,
+        help='[Asimov only] Sweep over these injected delatam31 values (eV^2).'
     )
 
     parser.add_argument(
@@ -274,6 +286,9 @@ respectively.'''
         assert args.asimov_data_settings is None, \
                 '"--asimov-data-settings" option not supported for LLR analysis.'
         assert args.sweep_t23 is None
+        assert args.sweep_dm31 is None
+        assert args.sweep_livetime is None
+
     if args.analysis == 'asimov':
         args.analysis_script = utils.expandPath(
             '$PISA/pisa/analysis/asimov/AsimovOptimizerAnalysis.py'
@@ -287,8 +302,12 @@ respectively.'''
         assert args.numtrials_per_job == 1, \
                 'numtrials-per-job = %d invalid for Asimov analysis' \
                 ' (only one outcome possible).' %args.numtrials_per_job
+        if args.sweep_livetime is not None:
+            args.sweep_livetime = GUTIL.hrlist2list(args.sweep_livetime)
         if args.sweep_t23 is not None:
             args.sweep_t23 = GUTIL.hrlist2list(args.sweep_t23)
+        if args.sweep_dm31 is not None:
+            args.sweep_dm31 = GUTIL.hrlist2list(args.sweep_dm31)
 
     if args.sweep_t23 is None:
         args.sweep_t23 = [None]
@@ -345,31 +364,54 @@ respectively.'''
                                                  absolute=False)
 
     count = 0
-    for t23 in args.sweep_t23:
+    for livetime, dm31, t23 in product(args.livetime,
+                                       args.dm31,
+                                       args.sweep_t23):
         for file_num in xrange(args.numjobs):
             #batch_basename = '%s__%s' %(an_ts_ms_basename, job_generation_timestamp)
             if args.analysis == 'llr':
-                filenum_str = '__' + '%06d' %file_num
                 timestamp = '__' + job_generation_timestamp
+                filenum_str = '__' + '%06d' %file_num
             elif args.analysis == 'asimov':
-                filenum_str = ''
+                # There is only one result possible for Asimov, so no need to
+                # re-run analysis multiple times
                 timestamp = ''
+                filenum_str = ''
 
-            if t23 is None:
-                job_basename = '%s' %(an_ts_ms_basename) + timestamp + filnum_str
-                out_basename = job_basename
-                args.sweepspec = ''
-            else:
-                job_basename = '%s__t23_%s' %(an_ts_ms_basename, str(t23)) + timestamp + filenum_str
-                out_basename = '%s' %(an_ts_ms_basename) + timestamp + filenum_str
-                args.sweepspec = ' --sweep-t23 ' + str(t23)
+            out_basename = '%s' %(an_ts_ms_basename) + timestamp + filnum_str
 
-            args.jobfile_path = os.path.join(args.jobdir, job_basename + '.pbs')
-            args.logfile_path = os.path.join(args.logdir, job_basename + '.log')
-            args.outfile_path = os.path.join(args.outdir, job_basename + '.json')
+            job_basename = '%s' %(an_ts_ms_basename) + timestamp + filnum_str
+            args.sweepspec = ''
+            sweep_suffix = ''
+            for val, shortname in [(livetime,'lt'), (t23,'t23'), (dm31,'dm31')]:
+                if val is not None:
+                    formatted = fnameNumFmt(livetime,
+                                            sigFigs=10,
+                                            keepAllSigFigs=False)
+                    sweep_suffix += shortname + '_' + formatted
+                    args.sweepspec += ' --sweep-%s %s' %(shortname, str(t23))
+
+            basename = an_ts_ms_basename + \
+                    sweep_suffix + \
+                    timestamp + \
+                    filenum_str
+
+            args.jobfile_path = os.path.join(args.jobdir, basename + '.pbs')
+            args.logfile_path = os.path.join(args.logdir, basename + '.log')
+            args.outfile_path = os.path.join(args.outdir, basename + '.json')
+
+            # Check to see if output file already exists; if it does, do not
+            # generate the jobfile
+            if os.path.exists(args.outfile_path):
+                logging.warn(
+                    'The output file "%s" already exists, so not generating'
+                    ' the associated job. If you wish to re-run this point,'
+                    ' remove that file and re-run this script.'
+                    %(args.outfile_path)
+                )
+                continue
 
             args.command = command_template.format(**vars(args))
-
             pbs_text = PBS_TEMPLATE.format(**vars(args))
 
             print 'Writing %d bytes to "%s"' %(len(pbs_text), args.jobfile_path)

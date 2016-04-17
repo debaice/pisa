@@ -3,6 +3,7 @@
 import os
 from glob import glob
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
+import re
 
 import numpy as np
 import pandas as pd
@@ -32,12 +33,21 @@ if __name__ == '__main__':
 
     metric = 'chisquare'
 
+    t23_re = re.compile(r'.*t23_([0-9.]+).json$')
     all_data = []
     for infile_name in args.files:
         base = os.path.basename(infile_name)
+        t23_injected = None
+        try:
+            t23_injected = float(t23_re.findall(base)[0])
+        except:
+            pass
         #geom = base[0:3].upper()
         data = from_json(infile_name)
-        ts_p_vals = {p: sd['value'] for p, sd in data['template_settings']['params'].iteritems()}
+        ts_p_vals = {
+            p: sd['value'] for p, sd in
+            data['template_settings']['params'].iteritems()
+        }
         results = data['results']
         geom = ts_p_vals['aeff_slice_smooth'][11:14].upper()
         assert geom in ['V36', 'V38', 'V39', 'V40'], geom
@@ -54,7 +64,10 @@ if __name__ == '__main__':
                 delta_chisquare = (results['data_IMH']['hypo_NMH'][metric][-1] -
                                    results['data_IMH']['hypo_IMH'][metric][-1])
 
-            t23 = np.rad2deg(t23)
+            if t23_injected is None:
+                t23 = np.rad2deg(t23)
+            else:
+                t23 = t23_injected
 
             sig_1sdd = np.sqrt(delta_chisquare)
             p_1sdd = stats.norm.sf(sig_1sdd)

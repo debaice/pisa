@@ -90,7 +90,7 @@ parser.add_argument(
     '--outfile',
     metavar='JSONFILE',
     help='''Output filename. Suffix(es) are added prior to extension if
-    scanning any parameters.'''
+    sweeping any parameters.'''
 )
 parser.add_argument(
     '-v', '--verbose', action='count', default=None,
@@ -147,12 +147,6 @@ if channel != asimov_data_settings['params']['channel']['value']:
             %(asimov_data_settings['params']['channel']['value'], channel)
     raise ValueError(error_msg)
 
-# Instantiate output dict with settings
-output = {'template_settings': deepcopy(template_settings),
-          'minimizer_settings': deepcopy(minimizer_settings)}
-if not utils.recursiveEquality(asimov_data_settings, template_settings):
-    output['asimov_data_settings'] = deepcopy(asimov_data_settings),
-
 template_maker = TemplateMaker(
     get_values(template_settings['params']),
     **template_settings['binning']
@@ -169,34 +163,28 @@ utils.mkdir(os.path.dirname(args.outfile))
 for livetime, t23, dm31 in itertools.product(args.sweep_livetime,
                                              args.sweep_t23,
                                              args.sweep_dm31):
+    # Set injected sweep parameter(s), if supplied
     labels = []
     if livetime is not None:
-        keep = False
-        sigFigs = 5
-        if len(args.sweep_livetime) > 1:
-            maxvaldig = np.floor(np.log10(np.max(args.sweep_livetime)))
-            mindiffdig = np.floor(np.log10(np.min(np.diff(args.sweep_livetime))))
-            sigFigs = int(maxvaldig-mindiffdig+1)
-            keep = True
-        labels += ['lt_' + fnameNumFmt(livetime, sigFigs=sigFigs, keepAllSigFigs=keep)]
+        template_settings['params']['livetime']['value'] = livetime
+        template_settings['params']['livetime']['fixed'] = True
+        labels += ['lt_' + fnameNumFmt(livetime, sigFigs=10,
+                                       keepAllSigFigs=False)]
     if t23 is not None:
-        keep = False
-        sigFigs = 5
-        if len(args.sweep_t23) > 1:
-            maxvaldig = np.floor(np.log10(np.max(args.sweep_t23)))
-            mindiffdig = np.floor(np.log10(np.min(np.diff(args.sweep_t23))))
-            sigFigs = int(maxvaldig-mindiffdig+1)
-            keep = True
-        labels += ['t23_' + fnameNumFmt(t23, sigFigs=sigFigs, keepAllSigFigs=keep)]
+        template_settings['params']['theta23_nh']['value'] = np.deg2rad(t23)
+        template_settings['params']['theta23_nh']['fixed'] = True
+
+        template_settings['params']['theta23_ih']['value'] = np.deg2rad(t23)
+        template_settings['params']['theta23_ih']['fixed'] = True
+        labels += ['t23_' + fnameNumFmt(t23, sigFigs=10, keepAllSigFigs=False)]
     if dm31 is not None:
-        keep = False
-        sigFigs = 5
-        if len(args.sweep_dm31) > 1:
-            maxvaldig = np.floor(np.log10(np.max(args.sweep_dm31)))
-            mindiffdig = np.floor(np.log10(np.min(np.diff(args.sweep_dm31))))
-            sigFigs = int(maxvaldig-mindiffdig+1)
-            keep = True
-        labels += ['dm31_' + fnameNumFmt(dm31, sigFigs=sigFigs, keepAllSigFigs=keep)]
+        template_settings['params']['deltam31_nh']['value'] = dm31
+        template_settings['params']['deltam31_nh']['fixed'] = True
+
+        template_settings['params']['deltam31_ih']['value'] = dm31
+        template_settings['params']['deltam31_ih']['fixed'] = True
+        labels += ['dm31_' + fnameNumFmt(dm31, sigFigs=10,
+                                         keepAllSigFigs=False)]
 
     # Generate two Asimov (not-fluctuated) datasets, one for each hierarchy.
     # For each Asimov dataset, find the best matching template in each
@@ -211,14 +199,6 @@ for livetime, t23, dm31 in itertools.product(args.sweep_livetime,
                 normal_hierarchy=data_normal
             )
         )
-
-        # Set injected sweep parameter(s), if supplied
-        if livetime is not None:
-            asimov_pvals['livetime'] = livetime
-        if t23 is not None:
-            asimov_pvals['theta23'] = np.deg2rad(t23)
-        if dm31 is not None:
-            asimov_pvals['deltam31'] = dm31
 
         asimov_fmap = get_asimov_fmap(
             asimov_data_maker,
@@ -246,12 +226,18 @@ for livetime, t23, dm31 in itertools.product(args.sweep_livetime,
             # Store the optimum data
             results[data_tag][hypo_tag] = opt_data
 
+    # Instantiate output dict with settings
+    output = {'template_settings': deepcopy(template_settings),
+              'minimizer_settings': deepcopy(minimizer_settings)}
+    if not utils.recursiveEquality(asimov_data_settings, template_settings):
+        output['asimov_data_settings'] = deepcopy(asimov_data_settings),
+
     output['results'] = results
 
     # Write to file
     rootname, ext = os.path.splitext(args.outfile)
     if len(labels) > 0:
-        labels.insert(0, '')
+        labels.insert(0, 'FIXED')
     outfname = rootname + '__'.join(labels) + ext
     to_json(output, outfname)
 
@@ -263,6 +249,7 @@ for livetime, t23, dm31 in itertools.product(args.sweep_livetime,
                     - np.min(results['data_IMH']['hypo_NMH'][args.metric]))
         logging.info('(hypo NMH is numerator): llr_nmh: %.4f, llr_imh: %.4f'
                      %(llr_nmh, llr_imh))
+
     elif args.metric == 'chisquare':
         chi2_nmh = np.min(results['data_NMH']['hypo_IMH'][args.metric])
         chi2_imh = np.min(results['data_IMH']['hypo_NMH'][args.metric])
