@@ -309,8 +309,12 @@ respectively.'''
         if args.sweep_dm31 is not None:
             args.sweep_dm31 = GUTIL.hrlist2list(args.sweep_dm31)
 
+    if args.sweep_livetime is None:
+        args.sweep_livetime = [None]
     if args.sweep_t23 is None:
         args.sweep_t23 = [None]
+    if args.sweep_dm31 is None:
+        args.sweep_dm31 = [None]
 
     if args.asimov_data_settings is None:
         args.asimov_data_settings = args.template_settings
@@ -364,9 +368,9 @@ respectively.'''
                                                  absolute=False)
 
     count = 0
-    for livetime, dm31, t23 in product(args.livetime,
-                                       args.dm31,
-                                       args.sweep_t23):
+    for livetime, t23, dm31 in product(args.sweep_livetime,
+                                       args.sweep_t23,
+                                       args.sweep_dm31):
         for file_num in xrange(args.numjobs):
             #batch_basename = '%s__%s' %(an_ts_ms_basename, job_generation_timestamp)
             if args.analysis == 'llr':
@@ -378,27 +382,33 @@ respectively.'''
                 timestamp = ''
                 filenum_str = ''
 
-            out_basename = '%s' %(an_ts_ms_basename) + timestamp + filnum_str
-
-            job_basename = '%s' %(an_ts_ms_basename) + timestamp + filnum_str
+            out_basename = '%s' %(an_ts_ms_basename) + timestamp + filenum_str
+            job_basename = '%s' %(an_ts_ms_basename) + timestamp + filenum_str
             args.sweepspec = ''
             sweep_suffix = ''
             for val, shortname in [(livetime,'lt'), (t23,'t23'), (dm31,'dm31')]:
                 if val is not None:
-                    formatted = fnameNumFmt(livetime,
+                    formatted = fnameNumFmt(val,
                                             sigFigs=10,
                                             keepAllSigFigs=False)
-                    sweep_suffix += shortname + '_' + formatted
-                    args.sweepspec += ' --sweep-%s %s' %(shortname, str(t23))
+                    sweep_suffix += '__' + shortname + '_' + formatted
+                    args.sweepspec += ' --sweep-%s %s' %(shortname, str(val))
 
-            basename = an_ts_ms_basename + \
+            if len(sweep_suffix) > 0:
+                sweep_suffix = '__FIXED_' + sweep_suffix
+
+            job_basename = an_ts_ms_basename + \
                     sweep_suffix + \
                     timestamp + \
                     filenum_str
 
-            args.jobfile_path = os.path.join(args.jobdir, basename + '.pbs')
-            args.logfile_path = os.path.join(args.logdir, basename + '.log')
-            args.outfile_path = os.path.join(args.outdir, basename + '.json')
+            out_basename = an_ts_ms_basename + \
+                    timestamp + \
+                    filenum_str
+
+            args.jobfile_path = os.path.join(args.jobdir, job_basename + '.pbs')
+            args.logfile_path = os.path.join(args.logdir, job_basename + '.log')
+            args.outfile_path = os.path.join(args.outdir, out_basename + '.json')
 
             # Check to see if output file already exists; if it does, do not
             # generate the jobfile
