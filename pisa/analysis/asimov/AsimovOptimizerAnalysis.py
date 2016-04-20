@@ -188,6 +188,20 @@ for livetime, t23, dm31 in itertools.product(args.sweep_livetime,
         labels += ['dm31_' + fnameNumFmt(dm31, sigFigs=10,
                                          keepAllSigFigs=False)]
 
+    rootname, ext = os.path.splitext(args.outfile)
+    if len(labels) > 0:
+        labels.insert(0, '__FIXED')
+    outfile_path = rootname + '__'.join(labels) + ext
+
+    if os.path.exists(outfile_path):
+        logging.warn(
+            'The output file "%s" already exists, so not generating'
+            ' the associated job. If you wish to re-run this point,'
+            ' remove that file and re-run this script.'
+            %(outfile_path)
+        )
+        continue
+
     # Generate two Asimov (not-fluctuated) datasets, one for each hierarchy.
     # For each Asimov dataset, find the best matching template in each
     # of the hierarchy hypotheses.
@@ -232,16 +246,12 @@ for livetime, t23, dm31 in itertools.product(args.sweep_livetime,
     output = {'template_settings': deepcopy(template_settings),
               'minimizer_settings': deepcopy(minimizer_settings)}
     if not utils.recursiveEquality(asimov_data_settings, template_settings):
-        output['asimov_data_settings'] = deepcopy(asimov_data_settings),
+        output['asimov_data_settings'] = deepcopy(asimov_data_settings)
 
     output['results'] = results
 
     # Write to file
-    rootname, ext = os.path.splitext(args.outfile)
-    if len(labels) > 0:
-        labels.insert(0, '__FIXED')
-    outfname = rootname + '__'.join(labels) + ext
-    to_json(output, outfname)
+    to_json(output, outfile_path)
 
     # Report result
     if args.metric == 'llh':

@@ -12,6 +12,7 @@ from itertools import product
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 
 from pisa.utils import utils
+from pisa.utils.log import logging
 
 from smartFormat import fnameNumFmt
 import genericUtils as GUTIL
@@ -410,8 +411,16 @@ respectively.'''
             args.logfile_path = os.path.join(args.logdir, job_basename + '.log')
             args.outfile_path = os.path.join(args.outdir, out_basename + '.json')
 
-            # Check to see if output file already exists; if it does, do not
-            # generate the jobfile
+            # Check to see if job or output files already exist; if one does,
+            # do not (re)generate the jobfile
+            if os.path.exists(args.jobfile_path):
+                logging.warn(
+                    'The job file "%s" already exists, so not (re)generating'
+                    ' the job. If you wish to re-run this point,'
+                    ' remove that file and re-run this script.'
+                    %(args.jobfile_path)
+                )
+                continue
             if os.path.exists(args.outfile_path):
                 logging.warn(
                     'The output file "%s" already exists, so not generating'
