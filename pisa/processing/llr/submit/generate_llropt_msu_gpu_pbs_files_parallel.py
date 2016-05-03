@@ -91,13 +91,13 @@ echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 echo ""
 
 echo "env | grep PBS"
-echo "---------------"
+echo "--------------"
 env | grep PBS
 echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 echo ""
 
 echo "cat \$PBS_NODEFILE"
-echo "-----------------"
+echo "------------------"
 [ -f "$PBS_NODEFILE" ] && cat $PBS_NODEFILE || echo "<no PBS_NODEFILE>"
 echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 echo ""
@@ -111,15 +111,19 @@ then
     echo ""
 fi
 
-echo "echo the command to be run"
-echo "--------------------------"
-echo 'time {command:s}'
+echo "echo the command(s) to be run"
+echo "--------------------00-------"
+echo '{command_a:s} &'
+echo '{command_b:s} &'
+echo 'wait'
 echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 echo ""
 
 echo "running command..."
 echo "------------------"
-time {command:s}
+{command_a:s} &
+{command_b:s} &
+wait
 echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 echo ""
 
@@ -151,6 +155,16 @@ then
     qstat -f $PBS_JOBID
 fi
 '''
+
+
+command_template = (
+    '{analysis_script:s}'
+    ' --template-settings="{template_settings:s}"'
+    ' --minimizer-settings="{minimizer_settings:s}"'
+    ' --ntrials={numtrials_per_job:d}'
+    ' --outfile="{outfile_path:s}"'
+    ' {flags:s}'
+)
 
 
 if __name__ == "__main__":
@@ -187,7 +201,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         '--numtrials-per-job',
-        type=str, required=True,
+        type=int, required=True,
         help='Number of LLR trials per job.'
     )
     parser.add_argument(
@@ -242,7 +256,7 @@ respectively.'''
         '$PISA/pisa/analysis/llr/LLROptimizerAnalysis.py'
     )
 
-    flags = ' --save-steps'
+    flags = '--save-steps'
     if args.single_octant:
         flags += ' --single_octant'
     if args.no_alt_fit:
@@ -280,23 +294,23 @@ respectively.'''
     # Expand any variables in template/minimizer settings resource specs passed
     # in by user (do *not* make absoulte, since resource specs in PISA allow
     # for implicit referencing from the $PISA/pisa/resources dir)
-    args.template_settings = utils.expandPath(args.template_settings, absolute=False)
-    args.minimizer_settings = utils.expandPath(args.minimizer_settings, absolute=False)
+    args.template_settings = utils.expandPath(args.template_settings,
+                                              absolute=False)
+    args.minimizer_settings = utils.expandPath(args.minimizer_settings,
+                                               absolute=False)
 
     for file_num in xrange(args.numjobs):
         job_basename = '%s__%06d' % (batch_basename, file_num)
 
         args.jobfile_path = os.path.join(args.jobdir, job_basename + '.pbs')
         args.logfile_path = os.path.join(args.logdir, job_basename + '.log')
-        args.outfile_path = os.path.join(args.outdir, job_basename + '.json')
+        outfile_a_path = os.path.join(args.outdir, job_basename + 'a.json')
+        outfile_b_path = os.path.join(args.outdir, job_basename + 'b.json')
 
-        command = ('{analysis_script:s} '
-                   '--template-settings="{template_settings:s}" '
-                   '--minimizer-settings="{minimizer_settings:s}" '
-                   '--ntrials={numtrials_per_job:s} '
-                   '--outfile="{outfile_path:s}" '
-                   '{flags:s}'.format(**vars(args)))
-        args.command = command
+        args.command_a = command_template.format(outfile_path=outfile_a_path,
+                                                 **vars(args))
+        args.command_b = command_template.format(outfile_path=outfile_b_path,
+                                                 **vars(args))
 
         pbs_text = PBS_TEMPLATE.format(**vars(args))
 
@@ -304,8 +318,9 @@ respectively.'''
         with open(args.jobfile_path, 'w') as jobfile:
             jobfile.write(pbs_text)
 
-    print '\n\n'
-    print 'Command: %s' % command
     print '\n'
+    print 'command_a: %s' % args.command_a
+    print 'command_b: %s' % args.command_b
+    print ''
     print 'Finished creating %d PBS job files in directory %s' % \
             (args.numjobs, args.jobdir)

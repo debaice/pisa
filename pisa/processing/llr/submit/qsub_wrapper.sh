@@ -7,6 +7,9 @@
 # NOTE: This is not a generic tool. This
 # should be modified for your own usage and convenience.
 
+[ ! -d submitted ] && (echo "Creating dir './submitted'";mkdir submitted)
+[ ! -d submitted ] && (echo "Could not create dir './submitted'; exiting.";exit)
+
 submitted_count=0
 for file in $*
 do

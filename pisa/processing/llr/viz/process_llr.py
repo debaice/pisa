@@ -7,8 +7,13 @@
 #
 #
 
+import os
 from copy import deepcopy
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
+import matplotlib as mpl
+mpl.rcParams['mathtext.fontset'] = 'custom' 
+mpl.rcParams['mathtext.rm'] = 'Arial'
+
 from matplotlib import pyplot as plt
 import numpy as np
 import seaborn as sns
@@ -21,6 +26,8 @@ from pisa.utils.params import get_values, select_hierarchy
 from dfUtils import get_llr_data_frames, get_llh_ratios, show_frame
 from plotUtils import plot_llr_distribution, plot_asimov_line, plot_fill
 from plotUtils import make_scatter_plot, plot_posterior_params
+
+from smartFormat import texLP
 
 def get_false_h_best_params(llh_data):
     params = {}
@@ -65,8 +72,11 @@ def make_llr_only_true_h(llr_dict, nbins, xlim=15):
         mcrow = plot_fill(
             llr_dict[opp_key], opp_key, mean_llr, hvals, bincen, gfit,
             alpha=0.5, hatch='xx', facecolor='black')
-        plt.legend(framealpha=0.5, loc='best')
+        plt.legend(framealpha=0.5, loc='upper right')
         plt.xlim(-xlim, xlim)
+        ylim = plt.ylim()
+        plt.ylim(0.8, ylim[-1])
+        plt.yscale('log')
         mc_table.append(mcrow)
 
     plt.tight_layout()
@@ -84,11 +94,11 @@ def set_xlim(llr_true_h, llr_false_h):
     true_h_std = llr_true_h.std()
     false_h_std = llr_false_h.std()
     if(true_h_median < false_h_median):
-        xmin = true_h_median - 3*true_h_std
-        xmax = false_h_median + 3*false_h_std
+        xmin = true_h_median - 4.5*true_h_std
+        xmax = false_h_median + 4.5*false_h_std
     else:
-        xmin = true_h_median + 3*true_h_std
-        xmax = false_h_median - 3*false_h_std
+        xmin = true_h_median + 4.5*true_h_std
+        xmax = false_h_median - 4.5*false_h_std
 
     ax.set_xlim([xmin, xmax])
     return ax
@@ -99,44 +109,87 @@ def make_llr_with_false_h(llr_true_h, llr_false_h, nbins, xlim=15):
 
     # 0) Plot true_h distributions, and get mean llr value
     logging.info(
-        "  -->Plotting, calculating gaussian parameters for MC True:")
-    colors = ['b', 'r']
+        "  -->Plotting, calculating gaussian parameters for MC True:"
+    )
+    colors = ['b', 'g']
     for ii, tkey in enumerate(['true_NH', 'true_IH']):
-        plt.subplot(1, 2, ii+1)
+        if tkey == 'true_NH':
+            inj_ord = 'normal'
+            hypo_ord = inj_ord
+        else:
+            inj_ord = 'inverted'
+            hypo_ord = inj_ord
+        ax = plt.subplot(1, 2, ii+1)
+        ax.set_title(r'Injected $\nu$-mass ordering: %s' %inj_ord)
+        ax.set_xlabel('Log-likelihood ratio')
         #label = r'$\mathcal{L}$( %s | IMH)/$\mathcal{L}$( %s | NMH)'%(tkey, tkey)
-        label = 'LLR(true Normal)' if tkey == 'true_NH' else 'LLR(true Inverted)'
+        #label = 'LLR(true Normal)' if tkey == 'true_NH' else 'LLR(true Inverted)'
         hvals, bincen, gfit = plot_llr_distribution(
-            llr_true_h[tkey], tkey, nbins, color=colors[ii], label=label)
+            llr_cur=llr_true_h[tkey], tkey=tkey, bins=nbins,
+            ax=ax, color=colors[ii], #label=label
+        )
+        t = ax.text(
+            0.02, 0.85, "Hypothesized\nordering: %s" %hypo_ord,
+            ha='left', va='top', transform=ax.transAxes,
+            #bbox={'facecolor':'slategrey', 'alpha':0.5, 'pad':2}
+        )
 
     logging.info("  -->Plotting  for false hierarchy best fit:")
     mc_table = []
-    colors = ['r', 'b']
+    colors = ['b', 'g']
     for ii, tkey in enumerate(['true_NH', 'true_IH']):
+        if tkey == 'true_NH':
+            hypo_ord = 'inverted'
+        else:
+            hypo_ord = 'normal'
 
         ax = plt.subplot(1, 2, ii+1)
         label=r'H$_0$: Other Hierarchy'
         hvals, bincen, gfit = plot_llr_distribution(
-            llr_false_h[tkey], tkey, nbins, color=colors[ii], label=label)
+            llr_cur=llr_false_h[tkey], tkey=tkey, bins=nbins,
+            ax=ax, color=colors[ii], label=label
+        )
         max_line = max(hvals)*1.2
         label=("Asimov_%s"%tkey)
 
         asimov_llr = llr_true_h[tkey].median()
 
         vline = plt.vlines(
-            asimov_llr, 0.1, max_line , colors='k')
+            asimov_llr, 0.1, max_line , colors='k'
+        )
+        plt.text(
+            x=asimov_llr, y=max_line*0.80, s='median',
+            rotation=90, ha='right', va='top'
+        )
 
         mcrow = plot_fill(
             llr_false_h[tkey], tkey, asimov_llr, hvals, bincen, gfit,
-            alpha=0.5, hatch='xx', facecolor='black')
-        ax.text(0.02, 0.98, r"$n_{\sigma,\,\mathrm{2-sided}}=%.2f$" %
-        mcrow[-1], ha='left', va='top', transform=ax.transAxes,
-        bbox={'facecolor':'slategrey', 'alpha':0.5, 'pad':2})
-        plt.legend(framealpha=0.5, loc='best')
+            alpha=0.5, hatch='xx', facecolor='black'
+        )
+        t = ax.text(
+            0.98, 0.85, "Hypothesized\nordering: %s" %hypo_ord,
+            ha='right', va='top', transform=ax.transAxes,
+            #bbox={'facecolor':'slategrey', 'alpha':0.5, 'pad':2}
+        )
+        ax.text(
+            0.28, 0.98,
+            r"Gauss sig, 2-sided: %.2f" %mcrow[-1] +
+            "\n" + 
+            r"Count sig, 2-sided: %.2f" %mcrow[-4] +
+            "\n" +
+            r"LLR trials: $%s$" %texLP(len(llr_true_h[tkey])),
+            ha='right', va='top', transform=ax.transAxes,
+            bbox={'facecolor':'slategrey', 'alpha':0.5, 'pad':2}
+        )
+        plt.legend(framealpha=0.5, loc='upper right')
 
         ax = set_xlim(llr_true_h[tkey], llr_false_h[tkey])
-        ax.set_ylim([0, max_line*1.2])
+        ax.set_yscale('log')
+        ylim = ax.get_ylim()
+        ax.set_ylim(0.8, max_line*1.2)
         mc_table.append(mcrow)
-        plt.grid(False)
+        plt.grid(b=True, which='minor', ls='-', color=[0.7]*3, lw=0.5, zorder=-5)
+        plt.grid(b=True, which='major', ls='-', color=[0.5]*3, lw=0.5, zorder=-5)
 
     plt.tight_layout()
     displayStats(mc_table)
@@ -209,10 +262,15 @@ else:
 ### 2) Plot Posterior Distributions
 ################################################################
 if args.save_fig:
-    filestem=args.llh_file.split('/')[-1]
-    filename=(filestem.split('.')[0]+'_LLR.png')
-    logging.warn('Saving to file: %s'%filename)
-    plt.savefig(filename, dpi=150)
+    #filestem=args.llh_file.split('/')[-1]
+    #basename = os.path.basename(args.llh_file) #args.llh_file.split('/')[-1]
+    #filename=(filestem.split('.')[0]+'_LLR.png')
+    rootname, extension = os.path.splitext(args.llh_file)
+    llr_rootname = rootname + '_llr'
+    logging.warn('Saving to file: %s' %llr_rootname+'.png')
+    plt.savefig(llr_rootname+'.png', dpi=150)
+    logging.warn('Saving to file: %s' %llr_rootname+'.pdf')
+    plt.savefig(llr_rootname+'.pdf')
 
 if args.params:
     df = df_false_h if args.false_h else df_true_h
